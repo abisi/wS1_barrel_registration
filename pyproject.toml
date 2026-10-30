@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "barrelreg"
+version = "0.1.0"
+description = "Local registration of the mouse wS1 barrel field in cleared light-sheet brains (method D2)"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-image>=0.22",
+    "pandas>=2.0",
+    "tifffile>=2023.1",
+    "matplotlib>=3.8",
+    "pillow>=10",
+    "h5py>=3.9",
+]
+
+[project.optional-dependencies]
+# only for brains without downsampled.points (cells mapped from raw space)
+rawpoints = ["brainglobe-space>=0.5"]
+
+[project.scripts]
+barrelreg = "barrelreg.__main__:main"
+
+[tool.setuptools]
+packages = ["barrelreg"]
+
+[tool.setuptools.package-data]
+barrelreg = ["data/structures.csv"]

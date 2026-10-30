@@ -1,0 +1,17 @@
+# AB / MH brains: brainreg to allen_mouse_bluebrain_barrels_10um (10 um sample space)
+[paths]
+atlas_dir = "/raid0/lebert/.brainglobe/allen_mouse_bluebrain_barrels_10um_v1.0"
+flatmap_nrrd = "/raid0/lmsmith/flatmap_float.nrrd"
+registration_annotation = "/raid0/lebert/.brainglobe/allen_mouse_bluebrain_barrels_10um_v1.0/annotation.tiff"
+data_root = "/raid0/lmsmith"
+registration_params = "examples/registration_params_allen_AB_MH.csv"
+work_dir = "/raid0/lmsmith/local_barrel_reg/D2_allen"
+cells_dir = "{data_root}/cells"
+export_dir = "{data_root}/local_barrel_reg/D2_allen/export"
+
+[registration]
+dir_pattern = "{data_root}/{group}_brains/{brain}/fused/registered"
+channel_glob = "downsampled_*ch_{ch}.tiff"
+raw_ch0_glob = "{data_root}/figure_brains/{brain}/raw_fullres/*_ch_0.tif"
+voxel_um = 10.0
+registration_atlas_um = 10.0

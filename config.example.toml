@@ -1,0 +1,32 @@
+# Copy to config.toml and edit. Relative paths are relative to this file.
+
+[paths]
+# Allen + Blue Brain barrel atlas (brainglobe): needs annotation.tiff
+atlas_dir = "/raid0/lebert/.brainglobe/allen_mouse_bluebrain_barrels_10um_v1.0"
+# Blue Brain flatmap of the CCF (10 um, gzip nrrd)
+flatmap_nrrd = "/raid0/lmsmith/flatmap_float.nrrd"
+# annotation (.npy or .tiff, asr) of the atlas the coarse registration went to; only used for the deformation-field
+# check and the cell comparison
+registration_annotation = "/raid0/lmsmith/brainglobe/perens_lsfm_mouse_20um_export/annotation.npy"
+# experiment root; {data_root} can be used in the entries below
+data_root = "/mnt/lsens-analysis/lana_smith/cfos_simplified"
+# brain table: column "brain" plus any columns used in registration.dir_pattern
+registration_params = "examples/registration_params.csv"
+# where everything is written (flatmap crop, template, one folder per brain, summaries)
+work_dir = "/raid0/lmsmith/local_barrel_reg/D2_repo"
+# detected cells (export step): <cells_dir>/<ID>/downsampled.points
+cells_dir = "{data_root}/detection_results/spotiflow_lsfm_v6_scratch_preds"
+# copy target of `export --copy`
+export_dir = "{data_root}/barrel_registration"
+
+[registration]
+# brainreg output folder of one brain; {data_root}, {brain} and the registration_params columns are filled in
+dir_pattern = "{data_root}/{brain}/registration/{brain}_atlasperens_lsfm_mouse_20um_bending_energy_weight{bending_energy_weight}_grid_spacing{grid_spacing}_smoothing_sigma_floating-1"
+# downsampled channel inside that folder ({ch} = 0 for the autofluorescence / anatomy channel)
+channel_glob = "downsampled_*C{ch}.tiff"
+# raw channel-0 stack, only needed when a brain has no downsampled.points (cells mapped from raw space)
+raw_ch0_glob = "{data_root}/{brain}/ch0/*.tiff"
+# voxel size of the brainreg downsampled stacks (um): 20 or 10
+voxel_um = 20.0
+# voxel size of the registration atlas (um): 20 for Perens, 10 for allen_mouse_bluebrain_barrels_10um
+registration_atlas_um = 20.0

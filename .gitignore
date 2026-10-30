@@ -1,0 +1,9 @@
+__pycache__/
+*.egg-info/
+config.toml
+*.npz
+*.npy
+*.tif
+*.tiff
+*.png
+!docs/figures/*.png
