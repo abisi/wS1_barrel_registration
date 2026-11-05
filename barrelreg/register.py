@@ -47,8 +47,11 @@ from .search import BP, brute_force, masked_corr, similarity_points, synth, znor
 
 PIX = 10.0  # flat pixel and working voxel, um
 OFFSETS_UM = list(range(-300, 75, 25))  # slab centre relative to the image L4 bottom (negative = above it)
-CONTRAST_RANGE = (-250, 25)  # offsets searched for the best band-pass contrast
-PATTERN_RANGE = (-200, -25)  # offsets searched for the best match to the barrel pattern
+# Offsets searched for the best band-pass contrast and for the best match to the barrel pattern. Over 36 AB/MH
+# hemispheres the contrast peaked at -25 / -50 um in 33; the 2 peaks at -200 / -250 um were L2/3 texture (AB082 left
+# then fitted a slab at 300 um depth, contrast after 0.98 -> 0.35). The pattern peaked at -25 to -100 um in 30 of 36.
+CONTRAST_RANGE = (-150, 0)
+PATTERN_RANGE = (-150, -25)
 TIE_CORR = 0.02  # candidates within this warped correlation of the best are treated as tied
 MAX_T = 600  # search shift range (um)
 SCALES = (0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4)

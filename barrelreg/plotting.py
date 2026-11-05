@@ -59,7 +59,7 @@ def flat_fit_figure(name, od, bp, valid, art, cols_before, cols_new, blobs, Ac, 
     draw(ax[2], cols_new)
     ax[0].plot([x0 + 10, x0 + 60], [y1 - 10] * 2, color="w", lw=3)
     ax[0].text(x0 + 35, y1 - 16, "500 um", color="w", ha="center")
-    fig.suptitle(f"{name}  D2 (own flatmap, coarse-registration start)  L4 {met['l4_depth_um']} um below image pia | matched "
+    fig.suptitle(f"{name}  D2 (own flatmap, coarse-registration start)  L4 slab {met['l4_depth_um']:.0f} um below image pia ({met.get('l4_offset_um', 0):+.0f} um from the L4 bottom) | matched "
                  f"{met['n_matched']}/{met['n_atlas']} | landmark err {met['err_initial_um']:.0f} -> "
                  f"{met['err_tps_loo_um']:.0f} um (LOO) | contrast {met['contrast_initial']:.2f} -> "
                  f"{met['contrast_after']:.2f} | Dice {met['dice_initial']:.2f} -> {met['dice_after']:.2f} | "
@@ -114,7 +114,7 @@ def overview_figure(cfg, bid, met):
             ax[0, j].imshow(im[int(im.shape[0] * 0.09):, int(im.shape[1] * 0.67):])
         head = f"{HEMI[hv]} barrel field (flat L4 view)"
         if m is not None:
-            head += f"\n{m['n_matched']}/33 matched, Dice {m['dice_after']:.2f}, L4 {m['l4_depth_um']} um"
+            head += f"\n{m['n_matched']}/33 matched, Dice {m['dice_after']:.2f}, L4 {m['l4_depth_um']:.0f} um"
         ax[0, j].set_title(head + (f"\n{status}" if status else ""), color="r" if "FAIL" in status else "w",
                            fontsize=13)
         # coronal slice through C2 of this hemisphere

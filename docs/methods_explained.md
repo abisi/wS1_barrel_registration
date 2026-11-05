@@ -334,9 +334,9 @@ to *read* in the template, the same pull-back idea as in section 2, so the warpe
     smoothed with a 50 µm Gaussian.
 - **Slab.** Voxels with depth below the image pia within ±30 µm of (bottom + offset). Offsets run from −300 to +50 µm
   in 25 µm steps, and each fit averages 3 neighbouring offsets (±25 µm).
-- **Two candidate offsets:**
-  - best band-pass contrast for offsets −250 to +25 µm;
-  - best pattern correlation (coarse search at 40 µm) for offsets −200 to −25 µm.
+- **Two candidate offsets** (ranges set from 36 AB/MH hemispheres, see `register.py`):
+  - best band-pass contrast for offsets −150 to 0 µm;
+  - best pattern correlation (coarse search at 40 µm) for offsets −150 to −25 µm.
 
   The full fit runs at both, and the one with more matched barrels wins.
 

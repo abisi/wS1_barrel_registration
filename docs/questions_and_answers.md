@@ -1,11 +1,12 @@
 # Questions and answers on D2 changes (2026-10-30)
 
-Answers 1 and 6 are partly pending: the comparison over all 48 Allen hemispheres (AB/MH) is still running in
-`/raid0/lmsmith/local_barrel_reg/D2_allen_l4bottom`.
+Results are from all 48 Allen hemispheres (24 AB/MH brains) in `/raid0/lmsmith/local_barrel_reg/D2_allen_l4bottom`,
+compared with the previous D2 run in `/raid0/lmsmith/local_barrel_reg/D2_allen`. The per-hemisphere table is
+`compare_old_vs_new.csv` in `neuropixels/local_barrel_registration/D2_l4bottom/`.
 
 ## 1. L4 bottom detection as the baseline for the slab and calculations
 
-Done; the validation over all hemispheres is pending the rerun.
+Done, and run on all 48 Allen hemispheres.
 
 The paper's `barrel_bottom` is now in [l4bottom.py](../barrelreg/l4bottom.py), with the parameters from the
 brain-space depth config:
@@ -17,19 +18,54 @@ brain-space depth config:
 It is used in three places:
 
 - **Slab:** sampled at an offset from that bottom instead of at a fixed depth. Offsets run from −300 to +50 µm. The
-  two candidates are the best contrast (offsets −250 to +25 µm) and the best pattern match (−200 to −25 µm).
+  two candidates are the best contrast (offsets −150 to 0 µm) and the best pattern match (−150 to −25 µm).
 - **Depth mapping:** image L4 bottom → atlas L4 bottom, per flat pixel. The atlas bottom is stored in the template;
   its median is 623 µm.
 - **Metrics:** `l4_bottom_um`, `l4_bottom_norm`, `atlas_l4_bottom_um`, `l4_offset_um`, `l4_bottom_found_frac`.
 
-First test, AB117 left:
+### Results over 48 hemispheres
 
-| | Before | Now |
+| | Previous D2 | With L4 bottom |
 |---|---|---|
-| Matched barrels | 31/33 | 33/33 |
-| Naming margin | 0.049 | 0.169 |
-| Normalised bottom | – | 0.52 (paper: 0.48–0.53) |
-| Patches with their own peak | – | 99% |
+| Failed fits (contrast after < 0.3) | 6 | 5 |
+| Matched barrels, median (mean) | 26 (25.4) | 28 (26.6) |
+| Contrast after fit, median | 0.92 | 1.02 |
+| Naming ambiguous | 10 | 10 |
+
+- **Matched barrels:** more in 27 hemispheres, fewer in 11.
+- **Rescued:** AB147 left (contrast 0.17 → 0.89). The other 5 failures failed in both versions: AB131 right, AB154
+  right, AB159 right, MH008 left, MH030 right.
+- **Clearly better** (contrast up by more than 0.2): 12 hemispheres. Examples: AB153 right (18 → 33 matched, contrast
+  0.60 → 1.48), AB092 left (0.35 → 0.80), AB085 right (0.76 → 1.02).
+- **Clearly worse:** 2 hemispheres, AB082 left (0.98 → 0.60) and AB147 right (1.11 → 0.73). In both, the slab sat
+  100–125 µm above the bottom, chosen because it matched more barrels.
+
+**The L4 bottom itself:**
+
+- Normalised depth median 0.49 (IQR 0.48–0.50), as in the paper (0.48–0.53 in MS176 and MS211).
+- In µm, median 498 µm below the image pia; the atlas L4 bottom is 623 µm.
+- 99% of patches find their own peak (median per hemisphere).
+
+**Where the slab works best:** the band-pass contrast peaked 25–50 µm above the bottom in 46 of 48 hemispheres. The
+chosen slab was at −25 or −50 µm in 42 of 48.
+
+**Offset ranges were set from the data.** In the first pass the ranges were wider (contrast −250 to +25 µm, pattern
+−200 to −25 µm). In AB082 left this picked L2/3 texture at −200 µm, about 300 µm deep (contrast 0.98 → 0.35). The
+ranges were narrowed to −150 to 0 and −150 to −25 µm, and the 5 affected brains (AB082, AB085, AB131, AB147, AB159)
+were rerun. Their first-pass metrics are kept in `D2_allen_l4bottom/pass1_ranges_wide/`.
+
+**Barrel names change between versions.** Among the 42 hemispheres where both fits are good, the median fraction of
+voxels with the same barrel name is 0.93:
+
+| Same name | Hemispheres |
+|---|---|
+| ≥ 0.9 | 25 |
+| 0.5–0.9 | 10 |
+| < 0.5 | 7 |
+
+In most of the 7 hemispheres renamed by more than half, the new fit has clearly higher contrast (for example AB085
+right, 0.06 the same, contrast 0.76 → 1.02), so the new names are more likely right. There is still no ground truth;
+the Neuropixels whisker responses are the independent check.
 
 Templates built before this change have no atlas L4 bottom, so `build-template` must be rerun (about 2 minutes).
 
@@ -114,7 +150,7 @@ result places template pixel i at c + d + sR(i − c): rotated and scaled about 
 
 ## 6. Convex-hull barrel columns (Blue Brain `annotations_to_positions.py`)
 
-Done; the effect on all brains is pending the rerun.
+Done, and used in the 48-hemisphere run.
 
 `hull_columns` in [flatmap.py](../barrelreg/flatmap.py) follows the same logic as Blue Brain's
 `atlas-enhancement/barrel-annotations/annotations_to_positions.py`:
@@ -132,5 +168,8 @@ Two smaller details:
 - The hull goes round the pixel corners.
 - Only each barrel's largest connected piece is used; 2 of the 33 template barrels have a stray pixel.
 
-On the template, the hulls grow the column area by about 3%. In AB117, CCF label agreement fell from 0.930 to 0.902.
-This is expected: hull edges cover voxels that the pixel-wise CCF annotation calls septum.
+On the template, the hulls grow the column area by about 3%. In the brains, under 1% of column voxels are in two
+hulls (0.3–0.6% per hemisphere).
+
+CCF label agreement fell from 0.93 to 0.90 in every hemisphere. This is expected: hull edges cover voxels that the
+pixel-wise CCF annotation calls septum. The agreement tests the inverse lookup, not the names.
