@@ -171,6 +171,19 @@ Known limits:
   `contrast_after < 0.3`.
 - Surface damage wider than ~0.8 mm is not bridged.
 
+## Step-by-step report per brain
+
+```bash
+BARRELREG_DEBUG=1 python -m barrelreg -c config.toml run MS261 --hemisphere 1   # also saves h1/debug.npz + debug3d.npz
+python scripts/brain_report.py -c config.toml MS261 --tracks tracks_summary.csv  # work_dir/reports/<ID>_h1_D2_report.pdf
+```
+
+`BARRELREG_DEBUG=1` saves every intermediate step of each hemisphere (about 250 MB per hemisphere; the fit is
+unchanged). The report has one page per step on that brain's own data: inputs, own flatmap, template, depth and L4
+bottom, slab choice and image barrels, the search landscape and top placements, the point matching of every candidate,
+the warp, the 3D columns and depth mapping, and, with `--tracks`, each Neuropixels wS1 track with its barrels along the
+probe under brainreg and under D2.
+
 ## Check against a previous run
 
 ```bash
