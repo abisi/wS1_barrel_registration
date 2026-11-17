@@ -59,6 +59,12 @@ PATTERN_RANGE = (-150, -25)
 TIE_CORR = 0.02  # candidates within this warped correlation of the best are treated as tied
 MAX_T = 600  # search shift range (um)
 SCALES = (0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4)
+MAX_R, STEP_R, STEP_T, TOPK, REFINE = 20, 2.5, 40, 5, False
+if os.environ.get("BARRELREG_SEARCH", "") == "wide":
+    # wider search: rotation +-30 deg (7/48 hemispheres sat on the +-20 bound), scale 0.6-1.5, shift +-800 um, 8
+    # candidates, each polished on a fine local grid (scale +-0.05, rotation +-3 deg, shift +-50 um)
+    MAX_T, SCALES = 800, tuple(np.round(np.arange(0.6, 1.5 + 1e-6, 0.1), 2))
+    MAX_R, STEP_R, STEP_T, TOPK, REFINE = 30, 3.0, 50, 8, True
 NEAR_UM = 1000  # flat coordinates are computed this far around the registered SSp-bfd
 CCF_NX = 1140  # CCF 10 um, axis 2 (mirror: x -> CCF_NX - 1 - x)
 WORK_UM = 20.0  # grid of the Laplace / streamline step
@@ -322,7 +328,8 @@ def run_hemi(cfg, bid, hv, od):
         mask = foot15 & v2
         fix = znorm(bandpass(l4f, valid, *BP), mask)
         fix[~v2] = 0
-        tops = brute_force(fix[::2, ::2], mov[::2, ::2], mask[::2, ::2], PIX * 2, centre / 2, max_t=MAX_T, scales=SCALES)
+        tops = brute_force(fix[::2, ::2], mov[::2, ::2], mask[::2, ::2], PIX * 2, centre / 2, max_t=MAX_T, scales=SCALES,
+                           max_r=MAX_R, step_r=STEP_R, step_t=STEP_T, topk=TOPK, refine=REFINE)
         # segment around the atlas field placed by the best search candidate (the identity can be ~600 um off)
         c0, sc, ang, dy, dx = tops[0]
         th = np.deg2rad(ang)
@@ -386,6 +393,8 @@ def run_hemi(cfg, bid, hv, od):
             fits.append(fit_at(d))
         except RuntimeError as e:
             print(f"  h{hv}: {e}", flush=True)
+    dbg(fit_offsets=sorted(FIT_OFFSETS or {d_con, d_pat}), img_ch=IMG_CH,
+        search_params=[MAX_T, STEP_T, MAX_R, STEP_R, min(SCALES), max(SCALES), TOPK, int(REFINE)])
     if not fits:
         raise RuntimeError("no L4 offset gave a fit")
     W = max(fits, key=lambda w: (len(w["best"]["ia"]), w["best"]["corr"]))

@@ -46,9 +46,9 @@ FIG = (16.5, 10)
 ACR = dict(zip(S.id.astype(int), S.acronym))
 STEPS = ["1 own flatmap (Laplace between registered pia and WM -> streamlines -> flat L4 plane)",
          "2 fixed template (atlas L4 barrels in the Blue Brain flatmap, same plane convention)",
-         "3 L4 bottom per column from ch0; L4 slab at two candidate offsets above it",
+         "3 L4 bottom per column from ch0; L4 slab at candidate offsets above it, best fit kept",
          "4 image barrels: artefact mask, band-pass, local maxima + watershed",
-         "5 exhaustive search: scale x rotation x shift of the synthetic barrel pattern -> top 5",
+         "5 exhaustive search: scale x rotation x shift of the synthetic barrel pattern -> top candidates",
          "6 per candidate: CPD affine -> CPD non-rigid -> Hungarian -> re-pairing -> LOO cleaning; tie-break",
          "7 thin-plate spline through the matches, near-affine outside the field",
          "8 3D: convex-hull barrel columns, piecewise depth mapping, inverse flatmap -> CCF"]
@@ -254,13 +254,23 @@ def flat_views(D, p, cols, cols_new, out_dir, tag, sig=None, cross=()):
 
 
 def page(pdf, title, sub="", h=FIG[1]):
-    """New page; h < 10 for one-row pages (less white space)."""
+    """New page; h < 10 for one-row pages (less white space). `sub` = explanation under the title; paragraphs are
+    separated by blank lines, each wrapped to the page width. fig.top_ = top of the panel area below the text."""
+    import textwrap
+    paras = [textwrap.fill(" ".join(q.split()), 205) for q in sub.split("\n\n") if q.strip()] if sub else []
+    n_lines = sum(q.count("\n") + 1 for q in paras) + max(len(paras) - 1, 0) * 0.4
+    h = h + 0.17 * n_lines  # the page grows with its text, the panels keep their size
     fig = plt.figure(figsize=(FIG[0], h))
-    fig.suptitle(title, x=0.01, ha="left", fontsize=15, weight="bold", y=0.985)
-    if sub:
-        fig.text(0.01, 1 - 0.55 / h, sub, fontsize=10, color="0.3", va="top", wrap=True)
-    if h < FIG[1]:
-        fig.subplots_adjust(left=0.03, right=0.97, top=1 - 1.3 / h, bottom=0.04, wspace=0.25)
+    fig.suptitle(title, x=0.01, ha="left", fontsize=15, weight="bold", y=1 - 0.15 / h)
+    y = 1 - 0.5 / h
+    for q in paras:
+        fig.text(0.01, y, q, fontsize=10, color="0.25", va="top", linespacing=1.35)
+        y -= (q.count("\n") + 1.4) * 0.17 / h
+    fig.top_ = y - 0.35 / h
+    if h - 0.17 * n_lines < FIG[1]:
+        fig.subplots_adjust(left=0.03, right=0.97, top=fig.top_, bottom=0.04, wspace=0.25)
+    else:
+        fig.subplots_adjust(top=fig.top_)
     return fig
 
 
@@ -370,9 +380,17 @@ def report(cfg, bid, hv, tracks, out_pdf):
     with PdfPages(out_pdf) as pdf:
         # ---------------------------------------------------------------- 0 summary
         fig = page(pdf, f"{bid}, {'left' if hv == 1 else 'right'} hemisphere: local barrel-field registration (D2)",
-                   f"registration: {reg} | one page per step, all panels from this brain's own "
-                   f"intermediate data")
-        ax = fig.add_axes([0.02, 0.05, 0.46, 0.85])
+                   f"What this is: brainreg aligns the whole brain to the Allen / Blue Brain barrel atlas. It gets the "
+                   f"hemisphere, the cortical surfaces and the rough position of the barrel field right, but single "
+                   f"barrels can be off by one or more barrel widths (100-500 um). D2 keeps only these coarse pieces "
+                   f"and finds the barrels again in this brain's own autofluorescence (ch0), where L4 barrels are visible "
+                   f"as bright patches separated by darker septa. The atlas barrel map is then warped onto them and the "
+                   f"result is carried back to 3D and to CCF coordinates.\n\n"
+                   f"Left: quality numbers of this fit (contrast after < 0.3 = failed: the warped atlas barrels are not "
+                   f"brighter than the septa). Right: the steps and, for Neuropixels tracks in this hemisphere, the L4 "
+                   f"barrels they cross before and after. Every following page shows one step on this brain's own "
+                   f"intermediate data. Registration: {reg}.")
+        ax = fig.add_axes([0.02, 0.05, 0.46, fig.top_ - 0.05])
         ax.axis("off")
         keys = [("n_blobs", "image blobs"), ("n_atlas", "atlas barrels"), ("n_matched", "matched barrels"),
                 ("contrast_initial", "contrast, brainreg"), ("contrast_after", "contrast, D2  (< 0.3 = failed)"),
@@ -392,9 +410,9 @@ def report(cfg, bid, hv, tracks, out_pdf):
         lines += ["", f"best search placement: scale {sb['scale']}, rotation {sb['rot_deg']} deg, "
                       f"shift {sb['shift_um'][0]:.0f}, {sb['shift_um'][1]:.0f} um (corr {sb['corr']:.3f})"]
         ax.text(0, 1, "\n".join(lines), family="monospace", fontsize=9.5, va="top")
-        ax = fig.add_axes([0.5, 0.05, 0.48, 0.85])
+        ax = fig.add_axes([0.5, 0.05, 0.48, fig.top_ - 0.05])
         ax.axis("off")
-        txt = ["Pipeline steps (pages 2-9):"] + [f"  {s}" for s in STEPS] + ["", "Neuropixels wS1 track(s) (page 10):"]
+        txt = ["Pipeline steps (one page each):"] + [f"  {s}" for s in STEPS] + ["", "Neuropixels wS1 track(s) (last pages):"]
         for nm, X, q in trk:
             b_reg = lab_reg[tuple(q.T)]
             b_d2 = out[tuple(q.T)]
@@ -410,8 +428,14 @@ def report(cfg, bid, hv, tracks, out_pdf):
 
         # ---------------------------------------------------------------- 1 inputs
         fig = page(pdf, "Inputs: autofluorescence (ch0) and the coarse whole-brain registration",
-                   "brainreg to allen_mouse_bluebrain_barrels_10um: used for the hemisphere, the rough SSp-bfd position "
-                   "and the pia / white-matter surfaces only. Box = crop around the registered SSp-bfd (+700 um).", h=6.5)
+                   "What: the cleared brain imaged in the autofluorescence channel (ch0, downsampled to 10 um) and "
+                   "brainreg's registration of the atlas (allen_mouse_bluebrain_barrels_10um) to it.\n\n"
+                   "Why only coarse: a whole-brain registration is driven by large structures (outline, ventricles, "
+                   "white matter); the barrels are small and only visible in a thin layer, so they barely pull on it. "
+                   "D2 therefore uses brainreg for the hemisphere, the pia and white-matter surfaces and the rough "
+                   "SSp-bfd position only.\n\n"
+                   "How to read: coronal ch0 with the registered atlas outlines; box = the crop around the registered "
+                   "SSp-bfd (+700 um) in which everything else is computed.", h=6.5)
         full = tifffile.memmap(cfg.ds_file(reg, 0), mode="r")
         zf = lo[0] + z
         ax = fig.add_subplot(1, 3, 1)
@@ -433,10 +457,17 @@ def report(cfg, bid, hv, tracks, out_pdf):
 
         # ---------------------------------------------------------------- 2 own flatmap
         fig = page(pdf, "Step 1. The brain's own flatmap",
-                   f"Laplace u between the registered pia (u=0) and white matter (u=1) on a 20 um grid; streamlines "
-                   f"follow grad u to the L4 level u0 = {float(D['u0']):.2f} (registered L4 {float(D['u0_reg']):.2f}); "
-                   f"end points are projected on a PCA plane (e1 anterior, e2 dorsal), origin = registered SSp-bfd L4 "
-                   f"centroid. Columns therefore follow the registered cortex curvature.", h=6.5)
+                   f"Why: barrels are columns perpendicular to the curved cortical sheet. To see the barrel pattern, L4 "
+                   f"has to be sampled along that curvature and laid flat, exactly as the atlas flatmap does for the "
+                   f"template (step 2).\n\n"
+                   f"How: Laplace's equation is solved between the registered pia (u = 0) and white matter (u = 1) on a "
+                   f"20 um grid; u rises smoothly through the cortex and its gradient points along the columns. From each "
+                   f"voxel a streamline follows the gradient to the L4 level u0 = {float(D['u0']):.2f} (registered L4 "
+                   f"{float(D['u0_reg']):.2f}). The end points form a curved sheet, projected on its best-fit (PCA) "
+                   f"plane: e1 anterior, e2 dorsal, origin = centroid of the registered SSp-bfd L4. Every voxel thus "
+                   f"gets a flat (e1, e2) position shared by its whole column.\n\n"
+                   f"How to read: left, u on a coronal slice with the L4 level (white) and some streamlines (red); "
+                   f"middle and right, the two flat coordinates with iso-lines every 200 um.", h=6.5)
         u20 = V["v_u20"].astype(np.float32)
         z20 = min(z // 2, u20.shape[0] - 1)
         ax = fig.add_subplot(1, 3, 1)
@@ -461,9 +492,12 @@ def report(cfg, bid, hv, tracks, out_pdf):
 
         # ---------------------------------------------------------------- 3 template
         fig = page(pdf, "Step 2. Fixed template: atlas L4 barrels in the Blue Brain flatmap",
-                   "Built once from the CCF annotation: barrel map (33 barrels), cortical thickness and atlas L4 "
-                   "bottom per flat pixel, and an inverse lookup (flat position, depth) -> CCF voxel. The search moves "
-                   "this map, not the brain.", h=6.5)
+                   "What: the reference that is fitted to every brain, built once from the CCF annotation and the Blue "
+                   "Brain flatmap: the map of the 33 L4 barrels (rows A-E and the 4 straddlers), the cortical thickness "
+                   "and atlas L4 bottom per flat pixel, and an inverse lookup (flat position, depth) -> CCF voxel.\n\n"
+                   "Why fixed: the template is the same for all brains, so the fit is comparable across brains, and the "
+                   "inverse lookup brings every result back to the same CCF space. The search and the warp move this "
+                   "map onto the brain, never the brain onto the map.", h=6.5)
         ax = fig.add_subplot(1, 3, 1)
         ax.imshow(np.where(alab > 0, 1, np.nan), cmap="Greys", vmin=0, vmax=3)
         draw(ax, cols)
@@ -486,10 +520,18 @@ def report(cfg, bid, hv, tracks, out_pdf):
 
         # ---------------------------------------------------------------- 4 depth and L4 bottom
         fig = page(pdf, "Step 3. Depth below the image pia and the L4 bottom (L4/L5 boundary) from ch0",
-                   f"Depth = distance below the segmented tissue surface after closing with a 400 um ball (bridges "
-                   f"notches and tears; bridged fraction {met['surface_bridged_frac']:.2f}). The L4 bottom is where the "
-                   f"ch0 barrel peak has fallen halfway to the trough below it (100 um patches pooled over 200 um). "
-                   f"The slab is sampled {d_off:+d} um from that bottom.")
+                   f"Why: barrels are only visible within L4 (about 150-200 um thick), and how deep L4 lies varies across "
+                   f"the field and between brains (shrinkage, cutting angle, registration error). The slab is therefore "
+                   f"placed relative to the L4 seen in the image, not the atlas L4.\n\n"
+                   f"How: depth = distance below the segmented tissue surface, after closing it with a 400 um ball so "
+                   f"that notches and tears do not count as surface (bridged fraction "
+                   f"{met['surface_bridged_frac']:.2f}). In ch0, L4 is brighter than L5; in 100 um patches (pooled over "
+                   f"200 um) the depth profile of ch0 has a peak in L4, and the L4 bottom is where it has fallen halfway "
+                   f"to the trough below. The bottom is smoothed over 50 um in the flat plane. The slab used for the fit "
+                   f"lies {d_off:+d} um from that bottom (negative = above).\n\n"
+                   f"How to read: coronal ch0 with the closed-surface depth (cyan, every 200 um) and the raw tissue edge "
+                   f"(orange); the L4 bottom (red) and the slab (yellow); the white-matter depth used for the columns "
+                   f"(magenta); the ch0 depth profile across the barrel field; flat maps of these quantities.")
         rel = V["v_rel"].astype(np.float32)
         ax = fig.add_subplot(2, 3, 1)
         grey(ax, ch0[z], title="ch0: closed-surface depth (cyan, every 200 um), raw edge (orange)")
@@ -533,12 +575,21 @@ def report(cfg, bid, hv, tracks, out_pdf):
         # ---------------------------------------------------------------- 5 slab and image barrels
         offs = list(D["offsets"])
         show = [o for o in offs if -150 <= o <= 0]
+        fo = [int(v) for v in np.atleast_1d(D["fit_offsets"])] if "fit_offsets" in D else [int(D["d_con"]), int(D["d_pat"])]
         fig = page(pdf, "Steps 3-4. L4 slab choice and image barrels",
-                   f"Top: ch0 in the flat plane at each offset from the L4 bottom (band-passed). Candidates: best "
-                   f"contrast ({int(D['d_con'])} um, range {CONTRAST_RANGE}) and best coarse pattern match "
-                   f"({int(D['d_pat'])} um, range {PATTERN_RANGE}); the full fit ran at both and kept {d_off:+d} um "
-                   f"(more matched barrels). Bottom: slab at {d_off:+d} um, artefact mask, image barrels.")
-        gs = fig.add_gridspec(2, len(show) + 1, top=0.88, hspace=0.25)
+                   f"Slab choice: ch0 is averaged in 60 um thick slabs at a series of offsets from the L4 bottom and "
+                   f"projected on the flat plane (top row, band-passed). The barrel pattern is sharpest somewhere inside "
+                   f"L4, but where exactly differs between brains. Two criteria score each slab: barrel / septum "
+                   f"contrast (best {int(D['d_con'])} um) and a coarse match to the atlas pattern (best "
+                   f"{int(D['d_pat'])} um). The full fit (steps 4-7) ran at {', '.join(f'{o:+d}' for o in fo)} um and "
+                   f"kept {d_off:+d} um, the one with most matched barrels.\n\n"
+                   f"Image barrels: the chosen slab is band-passed (difference of Gaussians, about 10-150 um) to remove "
+                   f"slow brightness changes and pixel noise. Artefacts (bubbles, tears, dye; |robust z| > 4.5) are "
+                   f"masked. Local maxima seed a watershed, giving one blob per putative barrel; their centroids are the "
+                   f"image landmarks for the matching.\n\n"
+                   f"How to read: bottom row, slab, artefact mask (red), band-passed slab with the blobs and their "
+                   f"centroids.")
+        gs = fig.add_gridspec(2, len(show) + 1, top=fig.top_, hspace=0.25)
         fld = ndimage.binary_dilation(D["foot"], iterations=10)
         for j, o in enumerate(show):
             ax = fig.add_subplot(gs[0, j])
@@ -556,7 +607,7 @@ def report(cfg, bid, hv, tracks, out_pdf):
         ax.legend(handles=[Line2D([], [], color="C0", marker="o", label="contrast"),
                            Line2D([], [], color="C1", marker="s", label="pattern corr")], fontsize=7)
         bpA, v2, art = D[p + "bpA"], D[p + "valid"] & ~D[p + "art"], D[p + "art"]
-        sub = fig.add_gridspec(2, 4, top=0.88, hspace=0.25)
+        sub = fig.add_gridspec(2, 4, top=fig.top_, hspace=0.25)
         ax = fig.add_subplot(sub[1, 0])
         grey(ax, D[p + "l4"], D[p + "valid"], title="slab (mean of offsets +-25 um)")
         zoom_to(ax, D["foot"], 25)
@@ -578,10 +629,22 @@ def report(cfg, bid, hv, tracks, out_pdf):
         # ---------------------------------------------------------------- 6 search
         sa = D[p + "search_all"]
         tops = D[p + "tops"]
+        sp = np.asarray(D["search_params"], float) if "search_params" in D else None
         fig = page(pdf, "Step 5. Exhaustive search of the barrel pattern",
-                   f"{len(sa):,} placements (scale x rotation x shift, 20 um grid) scored by masked correlation of the "
-                   f"synthetic pattern with the band-passed slab. Brainreg = identity (scale 1, rotation 0, shift 0). "
-                   f"The 5 best distinct placements go to the point matching.")
+                   f"Why exhaustive: brainreg can be one or more barrels off, rotated or scaled. A local optimiser started "
+                   f"there would lock onto the nearest barrel-sized pattern, which on a periodic grid is often the wrong "
+                   f"one. So every placement on a grid is tried.\n\n"
+                   f"How: the atlas barrels are drawn as a synthetic image (barrels 1, septa 0, band-passed like the "
+                   f"slab) and correlated with the slab, inside the field, for {len(sa):,} placements: "
+                   + (f"scale {sp[4]:.2f}-{sp[5]:.2f}, rotation +-{sp[2]:g} deg by {sp[3]:g}, shift +-{sp[0]:g} um by "
+                      f"{sp[1]:g} um (20 um pixels)" if sp is not None else "scale x rotation x shift on a 20 um grid")
+                   + f". Brainreg is the identity (scale 1, rotation 0, shift 0). The {len(tops)} best distinct "
+                   f"placements"
+                   + (" are polished on a fine local grid (scale +-0.05, rotation +-3 deg, shift +-50 um) and" if sp is not None and sp[7] else "")
+                   + f" go to the point matching (step 6), which decides between them.\n\n"
+                   f"How to read: best correlation for each scale and rotation (over all shifts), red + = candidates; "
+                   f"correlation over shifts at the best scale and rotation; the slab with the atlas barrels at each "
+                   f"candidate placement.")
         ax = fig.add_subplot(2, 3, 1)
         scs, angs = np.unique(sa[:, 1]), np.unique(sa[:, 2])
         H = np.full((len(scs), len(angs)), np.nan)
@@ -615,7 +678,7 @@ def report(cfg, bid, hv, tracks, out_pdf):
         fix = D[p + "fix"]
         for j, t in enumerate(tops[:4]):
             ax = fig.add_subplot(2, 3, [2, 3, 5, 6][j])
-            grey(ax, fix, D[p + "mask"], title=f"#{j + 1}: corr {t[0]:.3f}, scale {t[1]:.1f}, rot {t[2]:.1f}, "
+            grey(ax, fix, D[p + "mask"], title=f"#{j + 1}: corr {t[0]:.3f}, scale {t[1]:.2f}, rot {t[2]:.1f}, "
                                                f"shift {t[3]:.0f},{t[4]:.0f} um")
             outline_labels(ax, similarity_cols(cols, *t[1:], D["centre"]), names=True, lw=0.5)
             zoom_to(ax, D["foot"], 40)
@@ -625,11 +688,17 @@ def report(cfg, bid, hv, tracks, out_pdf):
         cand = sorted({int(k.split("_")[1][1:]) for k in D if k.startswith(p + "c") and k.endswith("_T_sim")})
         Ac, Bc = D["Ac"], D[p + "Bc"]
         fig = page(pdf, "Step 6. Point matching per candidate placement",
-                   "Grey = image blob centroids; blue = atlas barrel centres at the search placement; arrows = final "
-                   "one-to-one matches, drawn from each atlas barrel at the brainreg (identity) position to its blob (CPD affine -> CPD non-rigid -> Hungarian within 70 um and plausible size -> "
-                   "TPS re-pairing -> leave-one-out cleaning). Among candidates within 0.02 warped correlation of the "
-                   "best, the one whose matches an affine map explains best wins (a one-row naming shift cannot be "
-                   "affine).")
+                   "Why: the search gives a global placement; to correct each barrel, every atlas barrel needs its own "
+                   "image barrel. Blobs are not all barrels (septa, vessels, noise) and some barrels are not detected, "
+                   "so the pairing must tolerate outliers and missing points.\n\n"
+                   "How, per candidate placement: coherent point drift (CPD) aligns the atlas barrel centres to the blob "
+                   "centroids, first affine then non-rigid; the Hungarian algorithm then pairs them one-to-one within "
+                   "70 um and with a plausible blob size; pairs are re-made after a thin-plate-spline fit and pairs that "
+                   "a leave-one-out fit cannot predict are dropped. Choosing between candidates: among those within 0.02 "
+                   "warped correlation of the best, the one whose matches an affine map explains best wins, because a "
+                   "naming shifted by one row or arc fits the image equally well after warping but is not affine.\n\n"
+                   "How to read: grey = image blob centroids; blue = atlas barrel centres at the search placement; "
+                   "arrows = final matches, from each atlas barrel at the brainreg (identity) position to its blob.")
         for j, c in enumerate(cand[:5]):
             ax = fig.add_subplot(2, 3, j + 1)
             grey(ax, bpA, v2)
@@ -660,9 +729,16 @@ def report(cfg, bid, hv, tracks, out_pdf):
         # ---------------------------------------------------------------- 8 warp
         disp = D["disp"]
         fig = page(pdf, "Step 7. Thin-plate-spline warp through the matched barrels",
-                   f"Smoothing chosen by leave-one-out ({D['s_best']:g}); outside the field the warp blends into a "
-                   f"near-affine fit (900 um taper). Landmark error {met['err_initial_um']:.0f} um before -> "
-                   f"{met['err_tps_loo_um']:.0f} um leave-one-out after; min Jacobian {met['jac_min']:.2f}.")
+                   f"Why: barrel fields differ between mice and are distorted by tissue processing, not uniformly, so "
+                   f"a single scale / rotation is not enough. A smooth deformation through the matched centres moves each "
+                   f"atlas barrel onto its image barrel and carries the unmatched ones along with their neighbours.\n\n"
+                   f"How: thin-plate spline from the matched atlas centres to the blob centroids. Its smoothing "
+                   f"({D['s_best']:g}) is chosen by leave-one-out: each barrel is predicted from all the others, so the "
+                   f"warp cannot just memorise the matches. Outside the matched field it fades into a near-affine fit "
+                   f"over 900 um. Landmark error {met['err_initial_um']:.0f} um before -> {met['err_tps_loo_um']:.0f} um "
+                   f"leave-one-out after; min Jacobian {met['jac_min']:.2f} (> 0: no folding).\n\n"
+                   f"How to read: band-passed slab with brainreg and corrected barrels; size and direction of the "
+                   f"displacement; local area change (Jacobian); smoothing choice; per-barrel errors.")
         ax = fig.add_subplot(2, 3, 1)
         grey(ax, bpA, v2, title="brainreg (identity) placement")
         draw(ax, cols)
@@ -704,7 +780,7 @@ def report(cfg, bid, hv, tracks, out_pdf):
         done(pdf, fig)
 
         # ---------------------------------------------------------------- flat L4 views (publication panels)
-        fv_dir = os.path.join(os.path.dirname(out_pdf), "flat_views")
+        fv_dir = os.path.dirname(out_pdf)
         sig, cross = None, []
         try:
             sl_ = tuple(slice(int(a), int(b)) for a, b in D["sl"])
@@ -722,12 +798,15 @@ def report(cfg, bid, hv, tracks, out_pdf):
         box, l4s, valid, v2f, bpf, ref = flat_views(D, p, cols, cols_new, fv_dir, f"{bid}_h{hv}", sig=sig,
                                                     cross=cross)
         fig = page(pdf, "Flat L4 view: brainreg vs refined registration",
-                   f"Square crops of the flat L4 slab (offset {d_off} um from the L4 bottom; background flattened by the ratio to a 300 um Gaussian), barrel outlines coloured "
-                   f"by row (brainreg dashed, refined solid). Top: brainreg (global) vs refined (local) on the slab, with the matched image barrels (watershed blobs, thin white) as reference; bottom: the same on the band-passed slab "
-                   f"(artefacts masked). Each panel is also saved; *_side_by_side_signal adds the signal channel (probe dye, "
-                   f"red, 99th percentile through the column) and the wS1 tracks' L4 crossings "
-                   f"as png / pdf / svg in {fv_dir}.")
-        fig.subplots_adjust(left=0.12, right=0.75, top=0.86, bottom=0.02, wspace=0.03, hspace=0.12)
+                   f"Summary of the fit on the flat L4 slab ({d_off:+d} um from the L4 bottom; the slow brightness "
+                   f"gradient is removed by dividing by a 300 um Gaussian). Barrel outlines are coloured by row: "
+                   f"brainreg (global) dashed, refined (local) solid; thin white = the image barrels (watershed blobs) "
+                   f"matched to atlas barrels, i.e. what the refinement aims at. A good fit puts each solid outline on "
+                   f"one white blob.\n\n"
+                   f"Top: on the slab; bottom: on the band-passed slab (artefacts masked). All panels are saved as "
+                   f"square png / pdf / svg (editable text) in {fv_dir}; *_side_by_side_signal adds the signal channel "
+                   f"(probe dye, red, 99th percentile through each column) and a ring where each wS1 track crosses L4.")
+        fig.subplots_adjust(left=0.12, right=0.75, top=fig.top_, bottom=0.02, wspace=0.03, hspace=0.12)
         for i, (img, vv, lab, sg, t) in enumerate((
                 (l4s, valid, cols, False, "brainreg (global)"),
                 (l4s, valid, cols_new, False, "refined (local)"),
@@ -742,10 +821,16 @@ def report(cfg, bid, hv, tracks, out_pdf):
 
         # ---------------------------------------------------------------- 9 3D
         fig = page(pdf, "Step 8. Back to 3D: barrel columns and depth mapping",
-                   "Each voxel takes the barrel whose convex hull (flat plane) contains its corrected flat coordinate; "
-                   "columns run from the image pia to the brain WM depth. Depth is mapped piecewise linearly: image "
-                   "pia -> atlas pia, image L4 bottom -> atlas L4 bottom, brain WM -> atlas WM; then the inverse "
-                   "flatmap gives the CCF position.")
+                   "Why: units and probe tracks live in 3D, so each voxel of the barrel cortex needs a barrel label and a "
+                   "CCF position consistent with the corrected flat map.\n\n"
+                   "How: every voxel has a flat position (step 1); the warp (step 7) gives its corrected position in the "
+                   "template, and the voxel takes the barrel whose convex hull contains it, so barrels become columns "
+                   "from the image pia to the white matter. Depth is mapped piecewise linearly with three anchors (image "
+                   "pia -> atlas pia, image L4 bottom -> atlas L4 bottom, white matter -> atlas white matter), so layers "
+                   "line up even where this brain's cortex is thinner or thicker; the template's inverse lookup then "
+                   "gives the CCF voxel.\n\n"
+                   "How to read: coronal slices with brainreg and D2 barrel columns; depth mapping in one column; "
+                   "checks of the CCF lookup.")
         zs = [z] + [int(v) for v in np.percentile(np.argwhere(out > 0)[:, 0], [20, 80])]
         for j, zz in enumerate(zs):
             for i, (lab, t) in enumerate(((lab_reg, "brainreg"), (out, "D2"))):
@@ -778,9 +863,11 @@ def report(cfg, bid, hv, tracks, out_pdf):
         # ---------------------------------------------------------------- 10 tracks
         for nm, X, q in trk:
             fig = page(pdf, f"Neuropixels track {nm}: barrels along the probe, brainreg vs D2",
-                       "Track = brainreg-segment points in sample space, sampled every 10 um from the shallow end. "
-                       "Left: coronal slice at the track's L4 crossing. Middle: the track's L4 crossing in the flat "
-                       "view. Right: labels along the probe.")
+                       "Why: to assign each recording site to a barrel, the probe track (brainreg-segment points of the "
+                       "dye track, in sample space) is read out in the brainreg and in the D2 barrel columns.\n\n"
+                       "How to read: the track is sampled every 10 um from the shallow end. Left: coronal slice at the "
+                       "track's L4 crossing, brainreg (top) and D2 (bottom) columns. Middle: the L4 crossing in the flat "
+                       "view. Right: barrel and layer labels along the probe.")
             zt = int(np.median(q[:, 0]))
             for i, (lab, t) in enumerate(((lab_reg, "brainreg"), (out, "D2"))):
                 ax = fig.add_subplot(2, 3, 1 + 3 * i)
@@ -834,21 +921,24 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-c", "--config", default="config.toml")
     ap.add_argument("brains", nargs="+")
-    ap.add_argument("--hemisphere", type=int, default=1)
+    ap.add_argument("--hemisphere", type=int, choices=[1, 2], help="default: every hemisphere with a debug dump")
     ap.add_argument("--tracks")
     ap.add_argument("--out")
     a = ap.parse_args()
     cfg = Config(a.config)
     tracks = pd.read_csv(a.tracks) if a.tracks else None
     out = a.out or f"{cfg.work_dir}/reports"
-    os.makedirs(out, exist_ok=True)
     for b in a.brains:
-        try:
-            report(cfg, b, a.hemisphere, tracks, f"{out}/{b}_h{a.hemisphere}_D2_report.pdf")
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            print(b, "FAILED", flush=True)
+        hvs = [a.hemisphere] if a.hemisphere else [h for h in (1, 2)
+                                                   if os.path.exists(f"{cfg.brain_dir(b)}/h{h}/debug.npz")]
+        os.makedirs(f"{out}/{b}", exist_ok=True)  # one folder per mouse: report + flat-view figures
+        for hv in hvs:
+            try:
+                report(cfg, b, hv, tracks, f"{out}/{b}/{b}_h{hv}_D2_report.pdf")
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                print(b, f"h{hv}", "FAILED", flush=True)
 
 
 if __name__ == "__main__":

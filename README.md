@@ -193,6 +193,11 @@ Rescue runs (hemispheres that failed with the default slab choice): `BARRELREG_C
 of 0, and `BARRELREG_FIT_OFFSETS=-250,-200,-150,-100,-50,0,50` fits the L4 slab at each of these offsets (um from the
 L4 bottom) instead of the contrast / pattern picks; the fit with most matched barrels wins.
 
+`BARRELREG_SEARCH=wide` widens the pattern search (rotation +-30 deg by 3, scale 0.6-1.5 by 0.1, shift +-800 um by
+50 um, 8 candidates) and polishes each candidate on a fine local grid (scale +-0.05, rotation +-3 deg, shift +-50 um).
+`scripts/brain_report.py` writes one folder per mouse (`reports/<ID>/`: report PDF of each hemisphere with a debug dump,
+plus the flat-view figures); every page explains what the step does, why, and how to read the panels.
+
 ## Check against a previous run
 
 ```bash
