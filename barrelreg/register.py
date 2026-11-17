@@ -47,6 +47,10 @@ from .search import BP, brute_force, masked_corr, similarity_points, synth, znor
 
 PIX = 10.0  # flat pixel and working voxel, um
 OFFSETS_UM = list(range(-300, 75, 25))  # slab centre relative to the image L4 bottom (negative = above it)
+# rescue runs: BARRELREG_CH = image channel (default 0); BARRELREG_FIT_OFFSETS = comma list of L4 offsets (um) fitted
+# instead of the contrast / pattern picks (the fit with most matched barrels wins, as for the two picks)
+IMG_CH = int(os.environ.get("BARRELREG_CH", "0"))
+FIT_OFFSETS = [int(v) for v in os.environ.get("BARRELREG_FIT_OFFSETS", "").split(",") if v.strip()]
 # Offsets searched for the best band-pass contrast and for the best match to the barrel pattern. Over 36 AB/MH
 # hemispheres the contrast peaked at -25 / -50 um in 33; the 2 peaks at -200 / -250 um were L2/3 texture (AB082 left
 # then fitted a slab at 300 um depth, contrast after 0.98 -> 0.35). The pattern peaked at -25 to -100 um in 30 of 36.
@@ -167,7 +171,7 @@ def prep(cfg, bid, hv):
     sl = crop20(reg, hv, VOX, DN)
     A = np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")[sl]).astype(np.int64)
     H = np.asarray(tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")[sl])
-    I = np.asarray(tifffile.memmap(cfg.ds_file(reg, 0), mode="r")[sl]).astype(np.float32)
+    I = np.asarray(tifffile.memmap(cfg.ds_file(reg, IMG_CH), mode="r")[sl]).astype(np.float32)
     A20, H20 = A[::DN, ::DN, ::DN], H[::DN, ::DN, ::DN]
     # deformation-field check: field (mm) -> registration-atlas voxel -> annotation == registered atlas
     ann = cfg.registration_atlas()
@@ -377,7 +381,7 @@ def run_hemi(cfg, bid, hv, od):
 
     d_con, d_pat = max(con, key=con.get), max(pat, key=pat.get)
     fits = []
-    for d in sorted({d_con, d_pat}):
+    for d in sorted(FIT_OFFSETS or {d_con, d_pat}):
         try:
             fits.append(fit_at(d))
         except RuntimeError as e:

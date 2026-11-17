@@ -38,7 +38,6 @@ from matplotlib.lines import Line2D
 from barrelreg.atlas import BARREL_NAMES, BFD_IDS, C2, ISO_IDS, ROW_COL, S, SEPTA, collapse, row_of
 from barrelreg.config import Config
 from barrelreg.imageproc import bandpass
-from barrelreg.plotting import draw
 from barrelreg.register import CONTRAST_RANGE, PATTERN_RANGE, PIX
 
 plt.rcParams.update({"font.size": 10, "axes.titlesize": 11, "figure.facecolor": "white"})
@@ -59,7 +58,114 @@ def name(k):
 
 
 def rowcol(k):
-    return "k" if int(k) == C2 else ROW_COL[row_of(name(k))]
+    return ROW_COL[row_of(name(k))]
+
+
+ROW_LABEL = {"A": "row A", "B": "row B", "C": "row C", "D": "row D", "E": "row E", "S": "straddlers"}
+
+
+def draw(ax, cols, lw=1.0, names=True, fs=8, ls="-", alpha=1.0):
+    """Barrel outlines (smoothed contour of each barrel mask) coloured by row, names at the centroids."""
+    for k in np.unique(cols):
+        if k <= 0 or k >= SEPTA:
+            continue
+        m = ndimage.gaussian_filter((cols == k).astype(np.float32), 1.0)
+        ax.contour(m, [0.5], colors=[rowcol(k)], linewidths=lw, linestyles=ls, alpha=alpha)
+        if names:
+            cy, cx = np.argwhere(cols == k).mean(0)
+            ax.text(cx, cy, name(k), color=rowcol(k), fontsize=fs, ha="center", va="center", weight="bold",
+                    path_effects=[patheffects.withStroke(linewidth=1.4, foreground="black")])
+
+
+def flatten(img, valid, sigma=30, fine=0.8):
+    """Slab with the slow brightness gradient removed: ratio to a normalised-convolution Gaussian (300 um)."""
+    w = valid.astype(np.float32)
+    x = np.where(valid, np.nan_to_num(img), 0).astype(np.float32)
+    bg = ndimage.gaussian_filter(x, sigma) / np.maximum(ndimage.gaussian_filter(w, sigma), 1e-3)
+    return ndimage.gaussian_filter(x, fine) / np.maximum(ndimage.gaussian_filter(w, fine), 1e-3) / np.maximum(bg, 1e-6)
+
+
+def square_box(mask, pad=25):
+    """Square (y0, y1, x0, x1) around a mask, pad in flat px (10 um)."""
+    ys, xs = np.where(mask)
+    cy, cx = (ys.min() + ys.max()) / 2, (xs.min() + xs.max()) / 2
+    h = max(ys.max() - ys.min(), xs.max() - xs.min()) / 2 + pad
+    return cy - h, cy + h, cx - h, cx + h
+
+
+def flat_panel(ax, img, valid, box, cols=None, cols_ghost=None, signed=False, title="", fs=7, bar=True, names=True):
+    """One square flat-L4 view: grey image (contrast from the visible valid pixels), barrel outlines, 500 um bar."""
+    y0, y1, x0, x1 = box
+    yy, xx = np.mgrid[0:img.shape[0], 0:img.shape[1]]
+    inbox = valid & (yy >= y0) & (yy <= y1) & (xx >= x0) & (xx <= x1)
+    v = img[inbox] if inbox.any() else img[valid]
+    if signed:
+        s_ = np.percentile(np.abs(v), 99)
+        lo, hi = -s_, s_
+    else:
+        lo, hi = np.percentile(v, (1, 99.5))
+    ax.set_facecolor("black")
+    ax.imshow(np.where(valid, img, np.nan), cmap="gray", vmin=lo, vmax=hi, interpolation="bilinear")
+    if cols_ghost is not None:
+        draw(ax, cols_ghost, lw=0.8, names=False, ls="dashed", alpha=0.8)
+    if cols is not None:
+        draw(ax, cols, lw=1.3, fs=fs, names=names)
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y1, y0)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    if bar:
+        L = 500 / PIX
+        bx, by = x0 + 0.05 * (x1 - x0), y1 - 0.05 * (y1 - y0)
+        ax.plot([bx, bx + L], [by, by], color="w", lw=2.5, solid_capstyle="butt")
+        ax.text(bx + L / 2, by - 0.025 * (y1 - y0), "500 um", color="w", ha="center", va="bottom", fontsize=fs)
+    if title:
+        ax.set_title(title, fontsize=fs + 2)
+
+
+def row_legend(ax, fs=8):
+    h = [Line2D([], [], color=ROW_COL[r], lw=2, label=ROW_LABEL[r]) for r in "ABCDES"]
+    ax.legend(handles=h, loc="lower right", fontsize=fs, frameon=True, facecolor="black", edgecolor="none",
+              labelcolor="w", framealpha=0.6, handlelength=1.2)
+
+
+def flat_views(D, p, cols, cols_new, out_dir, tag):
+    """Publication panels, one square file each (png 300 dpi, pdf, svg): flat L4 slab with brainreg and with the
+    refined (D2) barrels, raw and band-passed, plus an overlay of both with the per-barrel shift."""
+    os.makedirs(out_dir, exist_ok=True)
+    valid, bp = D[p + "valid"], D[p + "bpA"]
+    l4 = flatten(D[p + "l4"], valid)
+    v2 = valid & ~D[p + "art"]
+    box = square_box((cols > 0) | (cols_new > 0))
+    views = {
+        "slab": dict(img=l4, valid=valid, title="flat L4 slab"),
+        "slab_brainreg": dict(img=l4, valid=valid, cols=cols, title="brainreg"),
+        "slab_refined": dict(img=l4, valid=valid, cols=cols_new, title="refined (D2)"),
+        "bandpass_brainreg": dict(img=bp, valid=v2, cols=cols, signed=True, title="brainreg, band-passed"),
+        "bandpass_refined": dict(img=bp, valid=v2, cols=cols_new, signed=True, title="refined (D2), band-passed"),
+        "overlay": dict(img=l4, valid=valid, cols=cols_new, cols_ghost=cols, names=False,
+                        title="refined (solid) vs brainreg (dashed)"),
+    }
+    plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "DejaVu Sans"], "svg.fonttype": "none"})
+    for key, kw in views.items():
+        fig = plt.figure(figsize=(4, 4))
+        ax = fig.add_axes([0, 0, 1, 0.93])
+        flat_panel(ax, box=box, **kw)
+        if key == "overlay":
+            for k in np.unique(cols_new):
+                if 0 < k < SEPTA and (cols == k).any():
+                    a, b = np.argwhere(cols == k).mean(0), np.argwhere(cols_new == k).mean(0)
+                    ax.annotate("", xy=(b[1], b[0]), xytext=(a[1], a[0]),
+                                arrowprops=dict(arrowstyle="-|>", color="w", lw=0.8, mutation_scale=7))
+        if key in ("slab_refined", "overlay"):
+            row_legend(ax, 7)
+        for ext in ("png", "pdf", "svg"):
+            fig.savefig(f"{out_dir}/{tag}_{key}.{ext}", dpi=300, facecolor="white")
+        plt.close(fig)
+    plt.rcParams.update({"svg.fonttype": "path"})
+    return box, l4, valid, v2, bp
 
 
 def page(pdf, title, sub="", h=FIG[1]):
@@ -510,6 +616,34 @@ def report(cfg, bid, hv, tracks, out_pdf):
         ax.set_xlabel("barrel centre error (um)")
         ax.legend(fontsize=8)
         ax.set_title("per-barrel landmark error")
+        done(pdf, fig)
+
+        # ---------------------------------------------------------------- flat L4 views (publication panels)
+        fv_dir = os.path.join(os.path.dirname(out_pdf), "flat_views")
+        box, l4s, valid, v2f, bpf = flat_views(D, p, cols, cols_new, fv_dir, f"{bid}_h{hv}")
+        fig = page(pdf, "Flat L4 view: brainreg vs refined registration",
+                   f"Square crops of the flat L4 slab (offset {d_off} um from the L4 bottom; background flattened by the ratio to a 300 um Gaussian), barrel outlines coloured "
+                   f"by row. Top: slab; bottom: band-passed slab (artefacts masked). Bottom right: refined outlines "
+                   f"(solid) over brainreg (dashed), arrows = shift of each barrel centre. Each panel is also saved "
+                   f"as png / pdf / svg in {fv_dir}.")
+        fig.subplots_adjust(left=0.02, right=0.98, top=0.86, bottom=0.02, wspace=0.04, hspace=0.12)
+        for i, (img, vv, lab, ghost, sg, t) in enumerate((
+                (l4s, valid, None, None, False, "flat L4 slab"),
+                (l4s, valid, cols, None, False, "brainreg"),
+                (l4s, valid, cols_new, None, False, "refined (D2)"),
+                (bpf, v2f, cols, None, True, "brainreg, band-passed"),
+                (bpf, v2f, cols_new, None, True, "refined (D2), band-passed"),
+                (l4s, valid, cols_new, cols, False, "refined (solid) vs brainreg (dashed)"))):
+            ax = fig.add_subplot(2, 3, i + 1)
+            flat_panel(ax, img, vv, box, cols=lab, cols_ghost=ghost, signed=sg, title=t, fs=7, names=i != 5)
+            if i == 2:
+                row_legend(ax, 8)
+            if i == 5:
+                for k in np.unique(cols_new):
+                    if 0 < k < SEPTA and (cols == k).any():
+                        a_, b_ = np.argwhere(cols == k).mean(0), np.argwhere(cols_new == k).mean(0)
+                        ax.annotate("", xy=(b_[1], b_[0]), xytext=(a_[1], a_[0]),
+                                    arrowprops=dict(arrowstyle="-|>", color="w", lw=0.8, mutation_scale=7))
         done(pdf, fig)
 
         # ---------------------------------------------------------------- 9 3D
