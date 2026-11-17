@@ -30,6 +30,7 @@ from skimage.segmentation import find_boundaries
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.patches
 import matplotlib.pyplot as plt
 from matplotlib import patheffects
 from matplotlib.backends.backend_pdf import PdfPages
@@ -57,8 +58,8 @@ def name(k):
     return BARREL_NAMES[int(k) - 1] if 0 < int(k) <= len(BARREL_NAMES) else ""
 
 
-# row palette of the report (bright on a grey slab, row order as a hue sweep, straddlers white)
-PAL = {"A": "#FF6F6F", "B": "#FFB547", "C": "#B5E655", "D": "#4DD4E8", "E": "#A98BFF", "S": "#F2F2F2"}
+# row palette of the report (bright on a grey slab, row order as a hue sweep, straddlers magenta)
+PAL = {"A": "#FF6F6F", "B": "#FFB547", "C": "#B5E655", "D": "#4DD4E8", "E": "#A98BFF", "S": "#F77FE0"}
 
 
 def rowcol(k):
@@ -97,7 +98,20 @@ def square_box(mask, pad=25):
     return cy - h, cy + h, cx - h, cx + h
 
 
-def flat_panel(ax, img, valid, box, cols=None, cols_ghost=None, signed=False, title="", fs=7, bar=True, names=True):
+REF_COL = "white"
+
+
+def draw_ref(ax, blobs, lw=0.7):
+    """Reference: outline of each image barrel (watershed blob) the atlas barrels were matched to."""
+    for k in np.unique(blobs):
+        if k <= 0:
+            continue
+        m = ndimage.gaussian_filter((blobs == k).astype(np.float32), 1.0)
+        ax.contour(m, [0.5], colors=[REF_COL], linewidths=lw, alpha=0.9)
+
+
+def flat_panel(ax, img, valid, box, cols=None, cols_ghost=None, signed=False, title="", fs=7, bar=True, names=True,
+               ref=None, ls="-", sig=None, cross=()):
     """One square flat-L4 view: grey image (contrast from the visible valid pixels), barrel outlines, 500 um bar."""
     y0, y1, x0, x1 = box
     yy, xx = np.mgrid[0:img.shape[0], 0:img.shape[1]]
@@ -110,10 +124,17 @@ def flat_panel(ax, img, valid, box, cols=None, cols_ghost=None, signed=False, ti
         lo, hi = np.percentile(v, (1, 99.5))
     ax.set_facecolor("black")
     ax.imshow(np.where(valid, img, np.nan), cmap="gray", vmin=lo, vmax=hi, interpolation="bilinear")
+    if sig is not None:
+        draw_signal(ax, sig)
+    if ref is not None:
+        draw_ref(ax, ref)
     if cols_ghost is not None:
         draw(ax, cols_ghost, lw=0.8, names=False, ls="dashed", alpha=0.8)
     if cols is not None:
-        draw(ax, cols, lw=1.3, fs=fs, names=names)
+        draw(ax, cols, lw=1.3, fs=fs, names=names, ls=ls)
+    for r_, c_ in cross:
+        ax.scatter([c_], [r_], s=70, facecolors="none", edgecolors="w", linewidths=1.6, zorder=5)
+        ax.scatter([c_], [r_], s=70, facecolors="none", edgecolors=SIG_COL, linewidths=0.8, zorder=6)
     ax.set_xlim(x0, x1)
     ax.set_ylim(y1, y0)
     ax.set_xticks([])
@@ -129,20 +150,70 @@ def flat_panel(ax, img, valid, box, cols=None, cols_ghost=None, signed=False, ti
         ax.set_title(title, fontsize=fs + 2)
 
 
-def row_legend(ax, fs=8):
+def row_legend(ax, fs=8, ref=False, outside=False, sig=False, cross=False):
     h = [Line2D([], [], color=PAL[r], lw=2, label=ROW_LABEL[r]) for r in "ABCDES"]
+    if ref:
+        k = "0.3" if outside else "w"  # line-style entries: dark on the white page, white on the image
+        h += [Line2D([], [], color=k, lw=1.3, ls="--", label="brainreg (global)"),
+              Line2D([], [], color=k, lw=1.3, label="refined (local)"),
+              Line2D([], [], color="0.75" if outside else REF_COL, lw=0.9, label="image barrels (reference)",
+                     path_effects=[patheffects.withStroke(linewidth=1.8, foreground="0.3")] if outside else None)]
+    if sig:
+        h.append(matplotlib.patches.Patch(color=SIG_COL, alpha=0.7, label="signal channel (probe dye)"))
+    if cross:
+        h.append(Line2D([], [], ls="", marker="o", mfc="none", mec=SIG_COL, mew=1.2, ms=7, label="track L4 crossing"))
+    if outside:  # to the right of the axes, on the white page
+        ax.legend(handles=h, loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=fs, frameon=False,
+                  handlelength=2.2)
+        return
     ax.legend(handles=h, loc="lower right", fontsize=fs, frameon=True, facecolor="black", edgecolor="none",
               labelcolor="w", framealpha=0.6, handlelength=1.2)
 
 
-def flat_views(D, p, cols, cols_new, out_dir, tag):
+SIG_COL = "#FF3B30"  # signal channel (probe dye) overlay
+
+
+def signal_flat(sig3, F, region, flat_lo, shape):
+    """Signal channel projected onto the flat map: per flat pixel the 99th percentile over the whole column (pia to
+    WM), background-subtracted and scaled to 0..1 (median -> 0, 99.9th percentile of the field -> 1)."""
+    m = region & np.isfinite(F).all(-1)
+    ij = np.rint((F[m] - flat_lo) / PIX - 0.5).astype(int)
+    ok = (ij >= 0).all(1) & (ij[:, 0] < shape[0]) & (ij[:, 1] < shape[1])
+    ij, v = ij[ok], sig3[m][ok].astype(np.float32)
+    lin = ij[:, 0] * shape[1] + ij[:, 1]
+    o = np.lexsort((v, lin))
+    lin, v = lin[o], v[o]
+    starts = np.r_[0, np.flatnonzero(np.diff(lin)) + 1]
+    ends = np.r_[starts[1:], len(lin)]
+    out = np.full(shape[0] * shape[1], np.nan, np.float32)
+    out[lin[starts]] = v[starts + ((ends - starts - 1) * 0.99).astype(int)]
+    out = out.reshape(shape)
+    have = np.isfinite(out)
+    out = ndimage.gaussian_filter(np.where(have, out, 0), 1.0) / np.maximum(
+        ndimage.gaussian_filter(have.astype(np.float32), 1.0), 1e-3)
+    lo, hi = np.nanpercentile(out[have], (50, 99.9))
+    return np.where(have, np.clip((out - lo) / max(hi - lo, 1e-6), 0, 1), 0)
+
+
+def draw_signal(ax, sig, gamma=1.5, amax=0.85):
+    rgba = np.zeros(sig.shape + (4,), np.float32)
+    rgba[..., :3] = matplotlib.colors.to_rgb(SIG_COL)
+    rgba[..., 3] = amax * sig ** gamma
+    ax.imshow(rgba, interpolation="bilinear")
+
+
+def flat_views(D, p, cols, cols_new, out_dir, tag, sig=None, cross=()):
     """Publication panels, one square file each (png 300 dpi, pdf, svg): flat L4 slab with brainreg and with the
-    refined (D2) barrels, raw and band-passed, plus both side by side (brainreg left, refined right)."""
+    refined (D2) barrels, raw and band-passed, plus both side by side (brainreg left, refined right). With `sig`
+    (signal channel on the flat map) a second side-by-side pair shows the probe dye in red, `cross` = flat (row, col)
+    of each track's L4 crossing (ring markers)."""
     os.makedirs(out_dir, exist_ok=True)
     valid, bp = D[p + "valid"], D[p + "bpA"]
     l4 = flatten(D[p + "l4"], valid)
     v2 = valid & ~D[p + "art"]
     box = square_box((cols > 0) | (cols_new > 0))
+    blobs = D[p + "blobs"]
+    ref = np.where(np.isin(blobs, np.asarray(D["ib"]) + 1), blobs, 0)  # blob k <-> centroid Bc[k - 1]
     views = {
         "slab": dict(img=l4, valid=valid, title="flat L4 slab"),
         "slab_brainreg": dict(img=l4, valid=valid, cols=cols, title="brainreg"),
@@ -161,21 +232,25 @@ def flat_views(D, p, cols, cols_new, out_dir, tag):
         for ext in ("png", "pdf", "svg"):
             fig.savefig(f"{out_dir}/{tag}_{key}.{ext}", dpi=300, facecolor="white")
         plt.close(fig)
-    # side by side: brainreg (global) left, refined right, same crop, outlines only
-    fig = plt.figure(figsize=(8, 4.2))
-    for i, (lab, t) in enumerate(((cols, "brainreg (global)"), (cols_new, "refined (local)"))):
-        ax = fig.add_axes([i * 0.5 + 0.005, 0, 0.49, 0.93])
-        flat_panel(ax, l4, valid, box, cols=lab, names=False, title=t, bar=i == 0)
-        if i == 1:
-            row_legend(ax, 7)
-    for ext in ("png", "pdf", "svg"):
-        fig.savefig(f"{out_dir}/{tag}_side_by_side.{ext}", dpi=300, facecolor="white")
-    plt.close(fig)
+    # side by side: brainreg (global) left, refined right, same crop; second version with the signal channel
+    for suffix, sg in (("", None), ("_signal", sig)):
+        if suffix and sg is None:
+            continue
+        fig = plt.figure(figsize=(9.6, 4.2))
+        for i, (lab, t, ls) in enumerate(((cols, "brainreg (global)", "dashed"), (cols_new, "refined (local)", "-"))):
+            ax = fig.add_axes([i * 0.415 + 0.004, 0, 0.405, 0.93])
+            flat_panel(ax, l4, valid, box, cols=lab, names=True, title=t, bar=i == 0, ref=ref, ls=ls, sig=sg,
+                       cross=cross if sg is not None else ())
+            if i == 1:
+                row_legend(ax, 7, ref=True, outside=True, sig=sg is not None, cross=len(cross) > 0 and sg is not None)
+        for ext in ("png", "pdf", "svg"):
+            fig.savefig(f"{out_dir}/{tag}_side_by_side{suffix}.{ext}", dpi=300, facecolor="white")
+        plt.close(fig)
     for ext in ("png", "pdf", "svg"):  # replaced by the side-by-side pair
         if os.path.exists(f"{out_dir}/{tag}_overlay.{ext}"):
             os.remove(f"{out_dir}/{tag}_overlay.{ext}")
     plt.rcParams.update({"svg.fonttype": "path", "pdf.fonttype": 3})
-    return box, l4, valid, v2, bp
+    return box, l4, valid, v2, bp, ref
 
 
 def page(pdf, title, sub="", h=FIG[1]):
@@ -630,22 +705,39 @@ def report(cfg, bid, hv, tracks, out_pdf):
 
         # ---------------------------------------------------------------- flat L4 views (publication panels)
         fv_dir = os.path.join(os.path.dirname(out_pdf), "flat_views")
-        box, l4s, valid, v2f, bpf = flat_views(D, p, cols, cols_new, fv_dir, f"{bid}_h{hv}")
+        sig, cross = None, []
+        try:
+            sl_ = tuple(slice(int(a), int(b)) for a, b in D["sl"])
+            sig3 = np.asarray(tifffile.memmap(cfg.ds_file(reg, 1), mode="r")[sl_])
+            Fs = V["v_F"].astype(np.float32)
+            sig = signal_flat(sig3, Fs, region & (V["v_hemi"] > 0), flat_lo, D[p + "l4"].shape)
+            relv = V["v_rel"].astype(np.float32)
+            for _, _, q in trk:
+                Fq, rq = Fs[tuple(q.T)], relv[tuple(q.T)]
+                k_ = np.isfinite(Fq).all(1) & (np.abs(rq - d_off) < 60)
+                if k_.any():
+                    cross.append(tuple((Fq[k_] - flat_lo).mean(0) / PIX - 0.5))
+        except (IndexError, OSError) as e:
+            print(f"  no signal channel overlay: {e}", flush=True)
+        box, l4s, valid, v2f, bpf, ref = flat_views(D, p, cols, cols_new, fv_dir, f"{bid}_h{hv}", sig=sig,
+                                                    cross=cross)
         fig = page(pdf, "Flat L4 view: brainreg vs refined registration",
                    f"Square crops of the flat L4 slab (offset {d_off} um from the L4 bottom; background flattened by the ratio to a 300 um Gaussian), barrel outlines coloured "
-                   f"by row. Top: brainreg (global) vs refined (local) on the slab; bottom: the same on the band-passed slab "
-                   f"(artefacts masked), with barrel names. Each panel is also saved "
+                   f"by row (brainreg dashed, refined solid). Top: brainreg (global) vs refined (local) on the slab, with the matched image barrels (watershed blobs, thin white) as reference; bottom: the same on the band-passed slab "
+                   f"(artefacts masked). Each panel is also saved; *_side_by_side_signal adds the signal channel (probe dye, "
+                   f"red, 99th percentile through the column) and the wS1 tracks' L4 crossings "
                    f"as png / pdf / svg in {fv_dir}.")
-        fig.subplots_adjust(left=0.02, right=0.98, top=0.86, bottom=0.02, wspace=0.04, hspace=0.12)
+        fig.subplots_adjust(left=0.12, right=0.75, top=0.86, bottom=0.02, wspace=0.03, hspace=0.12)
         for i, (img, vv, lab, sg, t) in enumerate((
                 (l4s, valid, cols, False, "brainreg (global)"),
                 (l4s, valid, cols_new, False, "refined (local)"),
                 (bpf, v2f, cols, True, "brainreg (global), band-passed"),
                 (bpf, v2f, cols_new, True, "refined (local), band-passed"))):
             ax = fig.add_subplot(2, 2, i + 1)
-            flat_panel(ax, img, vv, box, cols=lab, signed=sg, title=t, fs=7, names=i >= 2)
+            flat_panel(ax, img, vv, box, cols=lab, signed=sg, title=t, fs=7, names=True,
+                       ref=ref if i < 2 else None, ls="dashed" if i % 2 == 0 else "-")
             if i == 1:
-                row_legend(ax, 8)
+                row_legend(ax, 8, ref=True, outside=True)
         done(pdf, fig)
 
         # ---------------------------------------------------------------- 9 3D
