@@ -137,7 +137,7 @@ def row_legend(ax, fs=8):
 
 def flat_views(D, p, cols, cols_new, out_dir, tag):
     """Publication panels, one square file each (png 300 dpi, pdf, svg): flat L4 slab with brainreg and with the
-    refined (D2) barrels, raw and band-passed, plus an overlay of both with the per-barrel shift."""
+    refined (D2) barrels, raw and band-passed, plus both side by side (brainreg left, refined right)."""
     os.makedirs(out_dir, exist_ok=True)
     valid, bp = D[p + "valid"], D[p + "bpA"]
     l4 = flatten(D[p + "l4"], valid)
@@ -149,8 +149,6 @@ def flat_views(D, p, cols, cols_new, out_dir, tag):
         "slab_refined": dict(img=l4, valid=valid, cols=cols_new, title="refined (D2)"),
         "bandpass_brainreg": dict(img=bp, valid=v2, cols=cols, signed=True, title="brainreg, band-passed"),
         "bandpass_refined": dict(img=bp, valid=v2, cols=cols_new, signed=True, title="refined (D2), band-passed"),
-        "overlay": dict(img=l4, valid=valid, cols=cols_new, cols_ghost=cols, names=False,
-                        title="refined (solid) vs brainreg (dashed)"),
     }
     plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "DejaVu Sans"], "svg.fonttype": "none",
                          "pdf.fonttype": 42})
@@ -158,11 +156,24 @@ def flat_views(D, p, cols, cols_new, out_dir, tag):
         fig = plt.figure(figsize=(4, 4))
         ax = fig.add_axes([0, 0, 1, 0.93])
         flat_panel(ax, box=box, **kw)
-        if key in ("slab_refined", "overlay"):
+        if key == "slab_refined":
             row_legend(ax, 7)
         for ext in ("png", "pdf", "svg"):
             fig.savefig(f"{out_dir}/{tag}_{key}.{ext}", dpi=300, facecolor="white")
         plt.close(fig)
+    # side by side: brainreg (global) left, refined right, same crop, outlines only
+    fig = plt.figure(figsize=(8, 4.2))
+    for i, (lab, t) in enumerate(((cols, "brainreg (global)"), (cols_new, "refined (local)"))):
+        ax = fig.add_axes([i * 0.5 + 0.005, 0, 0.49, 0.93])
+        flat_panel(ax, l4, valid, box, cols=lab, names=False, title=t, bar=i == 0)
+        if i == 1:
+            row_legend(ax, 7)
+    for ext in ("png", "pdf", "svg"):
+        fig.savefig(f"{out_dir}/{tag}_side_by_side.{ext}", dpi=300, facecolor="white")
+    plt.close(fig)
+    for ext in ("png", "pdf", "svg"):  # replaced by the side-by-side pair
+        if os.path.exists(f"{out_dir}/{tag}_overlay.{ext}"):
+            os.remove(f"{out_dir}/{tag}_overlay.{ext}")
     plt.rcParams.update({"svg.fonttype": "path", "pdf.fonttype": 3})
     return box, l4, valid, v2, bp
 
@@ -622,20 +633,18 @@ def report(cfg, bid, hv, tracks, out_pdf):
         box, l4s, valid, v2f, bpf = flat_views(D, p, cols, cols_new, fv_dir, f"{bid}_h{hv}")
         fig = page(pdf, "Flat L4 view: brainreg vs refined registration",
                    f"Square crops of the flat L4 slab (offset {d_off} um from the L4 bottom; background flattened by the ratio to a 300 um Gaussian), barrel outlines coloured "
-                   f"by row. Top: slab; bottom: band-passed slab (artefacts masked). Bottom right: refined outlines "
-                   f"(solid) over brainreg (dashed). Each panel is also saved "
+                   f"by row. Top: brainreg (global) vs refined (local) on the slab; bottom: the same on the band-passed slab "
+                   f"(artefacts masked), with barrel names. Each panel is also saved "
                    f"as png / pdf / svg in {fv_dir}.")
         fig.subplots_adjust(left=0.02, right=0.98, top=0.86, bottom=0.02, wspace=0.04, hspace=0.12)
-        for i, (img, vv, lab, ghost, sg, t) in enumerate((
-                (l4s, valid, None, None, False, "flat L4 slab"),
-                (l4s, valid, cols, None, False, "brainreg"),
-                (l4s, valid, cols_new, None, False, "refined (D2)"),
-                (bpf, v2f, cols, None, True, "brainreg, band-passed"),
-                (bpf, v2f, cols_new, None, True, "refined (D2), band-passed"),
-                (l4s, valid, cols_new, cols, False, "refined (solid) vs brainreg (dashed)"))):
-            ax = fig.add_subplot(2, 3, i + 1)
-            flat_panel(ax, img, vv, box, cols=lab, cols_ghost=ghost, signed=sg, title=t, fs=7, names=i != 5)
-            if i == 2:
+        for i, (img, vv, lab, sg, t) in enumerate((
+                (l4s, valid, cols, False, "brainreg (global)"),
+                (l4s, valid, cols_new, False, "refined (local)"),
+                (bpf, v2f, cols, True, "brainreg (global), band-passed"),
+                (bpf, v2f, cols_new, True, "refined (local), band-passed"))):
+            ax = fig.add_subplot(2, 2, i + 1)
+            flat_panel(ax, img, vv, box, cols=lab, signed=sg, title=t, fs=7, names=i >= 2)
+            if i == 1:
                 row_legend(ax, 8)
         done(pdf, fig)
 
