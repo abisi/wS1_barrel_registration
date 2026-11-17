@@ -67,7 +67,7 @@ class Config:
     def registration_atlas(self):
         """Annotation of the coarse-registration atlas (.npy or .tiff), memory-mapped."""
         f = self.registration_annotation
-        return np.load(f, mmap_mode="r") if f.endswith(".npy") else tifffile.memmap(f)
+        return np.load(f, mmap_mode="r") if f.endswith(".npy") else tifffile.memmap(f, mode="r")
 
     def template(self):
         if self._template is None:

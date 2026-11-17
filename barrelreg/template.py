@@ -28,7 +28,7 @@ DPIX = 20.0  # depth bin of the inverse flatmap (um)
 def build(cfg, hv=1):
     FM = np.load(cfg.flatmap_crop, mmap_mode="r")
     FM_LO = np.load(cfg.flatmap_crop_lo)
-    ann = tifffile.memmap(cfg.annotation)
+    ann = tifffile.memmap(cfg.annotation, mode="r")
     sl = tuple(slice(int(a), int(a) + n) for a, n in zip(FM_LO, FM.shape[:3]))
     A = np.asarray(ann[sl])
     Fa = np.asarray(FM).astype(np.float32)

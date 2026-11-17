@@ -60,6 +60,30 @@ CCF_NX = 1140  # CCF 10 um, axis 2 (mirror: x -> CCF_NX - 1 - x)
 WORK_UM = 20.0  # grid of the Laplace / streamline step
 SURF_CLOSE_UM = 400  # surface damage narrower than ~2x this is bridged when measuring depth below the pia
 SURF_OPEN_UM = 75  # structures thinner than ~2x this (detached membranes) are not surface
+# BARRELREG_DEBUG=1: every intermediate step of a hemisphere is saved to h<hv>/debug.npz (2D) and debug3d.npz (crop
+# volumes), for scripts/brain_report.py. Off by default; the fit itself is unchanged.
+DEBUG = os.environ.get("BARRELREG_DEBUG", "") == "1"
+DBG = {}
+
+
+def dbg(prefix="", **kw):
+    if DEBUG:
+        for k, v in kw.items():
+            v = np.asarray(v)
+            if v.dtype == np.float64 and v.ndim == 3:
+                v = v.astype(np.float32)
+            DBG[prefix + k] = v
+
+
+def dbg_save(od):
+    if not DEBUG:
+        return
+    d2 = {k: v for k, v in DBG.items() if not k.startswith("v_")}  # v_ = crop volumes (float16 to keep it small)
+    d3 = {k: (v.astype(np.float16) if v.dtype in (np.float32, np.float64) else v) for k, v in DBG.items()
+          if k.startswith("v_")}
+    np.savez_compressed(f"{od}/debug.npz", **d2)
+    np.savez_compressed(f"{od}/debug3d.npz", **d3)
+    DBG.clear()
 
 
 def up(x, order, UP):
@@ -89,8 +113,8 @@ def block_mean(x, UP):
 def crop20(reg, hv, vox, dn, margin_um=700):
     """Box around the largest registered SSp-bfd component of hemisphere hv (sample voxels of size vox); the box
     lengths are multiples of dn so it splits into 20 um blocks."""
-    atl = tifffile.memmap(f"{reg}/registered_atlas.tiff")
-    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff")
+    atl = tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")
+    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")
     keep = np.isin(np.asarray(atl[::4, ::4, ::4]), BFD_IDS) & (np.asarray(hem[::4, ::4, ::4]) == hv)
     lab, n = ndimage.label(keep)
     sz = np.bincount(lab.ravel())
@@ -141,14 +165,14 @@ def prep(cfg, bid, hv):
     UP = int(WORK_UM / PIX)  # 10 um voxels per 20 um flatmap voxel
     reg = cfg.reg_dir(bid)
     sl = crop20(reg, hv, VOX, DN)
-    A = np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff")[sl]).astype(np.int64)
-    H = np.asarray(tifffile.memmap(f"{reg}/registered_hemispheres.tiff")[sl])
-    I = np.asarray(tifffile.memmap(cfg.ds_file(reg, 0))[sl]).astype(np.float32)
+    A = np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")[sl]).astype(np.int64)
+    H = np.asarray(tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")[sl])
+    I = np.asarray(tifffile.memmap(cfg.ds_file(reg, 0), mode="r")[sl]).astype(np.float32)
     A20, H20 = A[::DN, ::DN, ::DN], H[::DN, ::DN, ::DN]
     # deformation-field check: field (mm) -> registration-atlas voxel -> annotation == registered atlas
     ann = cfg.registration_atlas()
     sub = (slice(None, None, 3),) * 3
-    fld = np.stack([np.asarray(tifffile.memmap(f"{reg}/deformation_field_{i}.tiff")[sl][sub]) for i in range(3)], -1)
+    fld = np.stack([np.asarray(tifffile.memmap(f"{reg}/deformation_field_{i}.tiff", mode="r")[sl][sub]) for i in range(3)], -1)
     pv = np.rint(fld * 1000 / cfg.registration_atlas_um).astype(int)
     inb = (pv >= 0).all(-1) & (pv < np.array(ann.shape)).all(-1) & (A[sub] > 0)
     chk = float(np.mean(np.asarray(ann[tuple(pv[inb].T)]) == A[sub][inb]))
@@ -174,6 +198,8 @@ def prep(cfg, bid, hv):
     print(f"  h{hv}: crop {[(s.start, s.stop) for s in sl]}, field check {chk:.3f}, Laplace info {info}, "
           f"u0 {u0:.3f} (registered L4 {u0_reg:.3f}), {len(pts)} streamlines ({int(bad.sum())} not converged)  "
           f"({time.time() - t0:.0f}s)", flush=True)
+    dbg(sl=[[s.start, s.stop] for s in sl], field_check=chk, u0=u0, u0_reg=u0_reg, stream_start=pts[::25],
+        stream_end=P[::25], stream_bad=bad[::25], v_A20=A20.astype(np.int32), v_u20=u, v_l4_20=l4_20, v_F20=F20)
     # 10 um working grid
     if DN == 1:
         atl, ch0, hem = up(A20, 0, UP), up(I, 1, UP), up(H20, 0, UP)
@@ -188,6 +214,8 @@ def prep(cfg, bid, hv):
     dreg = (ndimage.distance_transform_edt(np.pad(atl > 0, pw, mode="edge"))[pw:-pw, pw:-pw, pw:-pw] * PIX).astype(np.float32)
     l4band = tissue & hemi & np.isfinite(Fu[..., 0]) & (np.abs(depth - 450) <= 75)
     bridged = float(np.mean(depth[l4band] - depth_raw[l4band] > 30)) if l4band.any() else 0.0
+    dbg(v_atl=atl.astype(np.int32), v_ch0=ch0, v_depth=depth, v_depth_raw=depth_raw, v_tissue=tissue, v_F=Fu,
+        v_hemi=hemi, v_dreg=dreg, surface_bridged_frac=bridged)
     return dict(sl=sl, atl=atl, ch0=ch0, hemi=hemi, F=Fu, tissue=tissue, depth=depth, dreg=dreg, near=up(near20, 0, UP),
                 surface_bridged_frac=bridged,
                 ctx=np.isin(atl, ISO_IDS) & hemi,
@@ -241,6 +269,7 @@ def run_hemi(cfg, bid, hv, od):
 
     bw_pia, bw_thick = flat_max(depth[mw]), flat_max(P["dreg"][mw])
     bw = np.maximum(bw_pia, bw_thick)
+    dbg(bw_pia=bw_pia, bw_thick=bw_thick, bw=bw, flat_lo=flat.lo, flat_shape=flat.shape)
 
     # image L4 bottom (L4/L5 boundary) per flat pixel, and every voxel's depth relative to it
     bot, bot_norm, bot_patches = barrel_bottom(P["ch0"], depth, G, good, flat, bw)
@@ -249,6 +278,7 @@ def run_hemi(cfg, bid, hv, od):
     b_img = ndimage.map_coordinates(bot, fi.T, order=1, mode="nearest")
     rel = np.full(depth.shape, np.nan, np.float32)
     rel[region] = depth[region] - b_img
+    dbg(bot=bot, bot_norm=bot_norm, v_rel=rel, v_region=region, v_good=good)
 
     # image L4 slab at offsets from that bottom: two candidate offsets, full fit at both, more matched barrels wins
     fieldd = ndimage.binary_dilation(foot, iterations=10)
@@ -269,6 +299,9 @@ def run_hemi(cfg, bid, hv, od):
             fx[~v_d] = 0
             pat[d] = brute_force(fx[::4, ::4], mov[::4, ::4], (foot15 & v_d)[::4, ::4], PIX * 4, centre / 4, topk=1,
                                  max_t=MAX_T, step_t=80, step_r=5, max_r=10, scales=(0.8, 0.9, 1.0, 1.1))[0][0]
+    dbg(offsets=OFFSETS_UM, stack_img=np.stack([stack[d][0] for d in OFFSETS_UM]),
+        stack_valid=np.stack([stack[d][1] for d in OFFSETS_UM]), con_d=list(con), con_v=list(con.values()),
+        pat_d=list(pat), pat_v=list(pat.values()), alab=alab, cols=cols, foot=foot, mov=mov, centre=centre)
     ksA, Ac, areaA = ps.atlas_points(cols)
     U, V = cols.shape
     gy, gx = np.mgrid[0:U, 0:V]
@@ -293,14 +326,18 @@ def run_hemi(cfg, bid, hv, od):
         cols_s = ndimage.affine_transform(cols, Mi, offset=centre - Mi @ (centre + np.array([dy, dx]) / PIX), order=0)
         roi = v2 & ndimage.binary_dilation((cols > 0) | (cols_s > 0), iterations=25)
         blobs, Bc, areaB, _ = segment(bpA, roi)
+        p = f"o{d4}_"
+        dbg(p, l4=l4, valid=valid, art=art, bpA=bpA, fix=fix, mask=mask, search_all=brute_force.last_all,
+            tops=np.array(tops), cols_s=cols_s, roi=roi, blobs=blobs, Bc=Bc, areaB=areaB)
         print(f"  h{hv} L4 slab {d4:+d} um from the L4 bottom, {len(Bc)} blobs, {len(Ac)} atlas barrels, "
               f"top search corr {[round(t[0], 3) for t in tops]}  ({time.time() - t0:.0f}s)", flush=True)
         cands = []
-        for c0, sc, ang, dy, dx in tops:
+        for j, (c0, sc, ang, dy, dx) in enumerate(tops):
             T_sim = similarity_points(Ac, sc, ang, np.array([dy, dx]) / PIX, centre)
             T_aff, *_ = ps.cpd_affine(Bc, T_sim, w=0.3, s2=16.0)
             T_nr, _ = ps.cpd_nonrigid(Bc, T_aff, beta=25.0, lam=3.0, w=0.3, s2=9.0)
             ia, ib = ps.hungarian(T_nr, Bc, ps.GATE_PX, areaA, areaB)
+            dbg(f"{p}c{j}_", T_sim=T_sim, T_aff=T_aff, T_nr=T_nr, ia_h=ia, ib_h=ib)
             if len(ia) < 6:
                 continue
             for _ in range(3):
@@ -320,6 +357,7 @@ def run_hemi(cfg, bid, hv, od):
             Xa, *_ = np.linalg.lstsq(Ph, Bc[ib], rcond=None)
             affres = float(np.median(np.linalg.norm(Ph @ Xa - Bc[ib], axis=1)) * PIX)
             cands.append(dict(corr=corr, ia=ia, ib=ib, wl=wl, affres=affres, search=(c0, sc, ang, dy, dx)))
+            dbg(f"{p}c{j}_", ia=ia, ib=ib, corr=corr, affres=affres, wl=wl, search=(c0, sc, ang, dy, dx))
             print(f"   candidate search corr {c0:.3f} (scale {sc}, rot {ang}, shift {dy:.0f},{dx:.0f} um): "
                   f"{len(ia)} matched, affine residual {affres:.0f} um -> warped corr {corr:.3f}", flush=True)
         if not cands:
@@ -362,12 +400,16 @@ def run_hemi(cfg, bid, hv, od):
     dist = ndimage.distance_transform_edt(~ndimage.binary_dilation(foot | placed, iterations=5))
     wt = np.where(dist >= ps.TAPER_PX, 0.0, 0.5 * (1 + np.cos(np.pi * np.minimum(dist, ps.TAPER_PX) / ps.TAPER_PX)))
     disp_far = ps.tps_fit(Bc[ib], Ac[ia], 1e6)(grid).T.reshape(2, U, V)  # ~affine outside the field
+    dbg(disp_tps=disp, disp_far=disp_far, wt=wt, placed=placed)
     disp = wt[None] * disp + (1 - wt[None]) * disp_far
     jac = ps.jacobian_2d(disp)
     alab_new = ndimage.map_coordinates(alab, [gy + disp[0], gx + disp[1]], order=0, cval=0)
     cols_new = np.where(alab_new < SEPTA, alab_new, 0)
     e_before = np.linalg.norm(Ac[ia] - Bc[ib], axis=1) * PIX
     e_loo = ps.loo(Ac[ia], Bc[ib], s_best) * PIX
+    dbg(chosen_offset=d_off, d_con=d_con, d_pat=d_pat, Ac=Ac, ksA=ksA, ia=ia, ib=ib, smooth_s=list(errs),
+        smooth_err=list(errs.values()), s_best=s_best, disp=disp, jac=jac, alab_new=alab_new, cols_new=cols_new,
+        e_before=e_before, e_loo=e_loo)
 
     # 3D: corrected flat coordinate -> template barrel column (convex hull); depth: pia -> pia, image L4 bottom ->
     # atlas L4 bottom, WM -> atlas WM
@@ -384,6 +426,11 @@ def run_hemi(cfg, bid, hv, od):
     lab[~incol] = 0
     out = np.zeros(P["atl"].shape, np.uint8)
     out[region] = lab
+    if DEBUG:
+        vols = {k: np.full(depth.shape, np.nan, np.float32) for k in ("adep", "bimg", "batl", "tb", "th")}
+        for k, v in zip(vols, (adep, b_img, b_atl, tb, th)):
+            vols[k][region] = v
+        dbg(v_out=out, **{f"v_{k}": v for k, v in vols.items()})
 
     # CCF: (corrected template coordinate, mapped atlas depth) -> inverse flatmap -> CCF voxel (10 um)
     inv, inv_have = TPL["inv"], TPL["inv_have"]
@@ -400,7 +447,7 @@ def run_hemi(cfg, bid, hv, od):
     ccf_vol = np.full(P["atl"].shape + (3,), np.nan, np.float32)
     ccf_vol[region] = ccf
     # check: labelled voxels -> CCF annotation at the mapped voxel (collapsed) == their label
-    ann = tifffile.memmap(cfg.annotation)
+    ann = tifffile.memmap(cfg.annotation, mode="r")
     hit = ok & (lab > 0)
     cv = np.clip(np.rint(ccf[hit]).astype(int), 0, np.array(ann.shape) - 1)
     ccf_lab = collapse(np.asarray(ann[tuple(cv.T)]))
@@ -447,6 +494,7 @@ def run_hemi(cfg, bid, hv, od):
                seconds=round(time.time() - t0))
     json.dump(met, open(f"{od}/metrics.json", "w"), indent=1, default=float)
     flat_fit_figure(f"{bid}_h{hv}", od, bpA, v2, art, cols, cols_new, blobs, Ac, Bc, ia, ib, met)
+    dbg_save(od)
     print(f"{bid} h{hv}: {len(ia)}/{len(Ac)} matched | err {met['err_initial_um']:.0f} -> LOO "
           f"{met['err_tps_loo_um']:.0f} um | contrast {met['contrast_initial']:.2f} -> {met['contrast_after']:.2f} | "
           f"Dice {d_b:.2f} -> {d_a:.2f} | {n_agree}/{W['n_cands']} candidates agree, margin {margin:.3f} | "
@@ -466,7 +514,7 @@ def run(cfg, bid, hemispheres=(1, 2)):
             f.write("index,barrel\n" + "".join(f"{k + 1},{n}\n" for k, n in enumerate(BARREL_NAMES)))
     UP = int(cfg.voxel_um / PIX)
     reg = cfg.reg_dir(bid)
-    shape = tifffile.memmap(f"{reg}/registered_atlas.tiff").shape
+    shape = tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r").shape
     full = np.zeros(shape, np.uint8)
     ccf_full = np.full(shape + (3,), np.nan, np.float32)
     print(f"{bid}: {os.path.basename(reg)}", flush=True)
@@ -490,6 +538,6 @@ def run(cfg, bid, hemispheres=(1, 2)):
     tifffile.imwrite(f"{od}/barrels_corrected_full.tif", full, compression="zlib")
     for k in range(3):
         tifffile.imwrite(f"{od}/ccf_field_{k}.tif", ccf_full[..., k] / 100.0, compression="zlib")  # mm
-    coronal_figure(bid, tifffile.memmap(cfg.ds_file(reg, 0)), full, f"{od}/{bid}_coronal.png")
+    coronal_figure(bid, tifffile.memmap(cfg.ds_file(reg, 0), mode="r"), full, f"{od}/{bid}_coronal.png")
     print(f"{bid}: done, {len(mets)}/{len(hemispheres)} hemispheres ({time.time() - t0:.0f}s)", flush=True)
     return mets

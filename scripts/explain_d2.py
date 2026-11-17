@@ -90,14 +90,14 @@ def fig1(cfg, bid, hv, out):
     lo, UP = fz["crop20_lo"], int(fz["up"])
     G = fz["G"]
     lab = tifffile.imread(f"{cfg.brain_dir(bid)}/barrels_corrected_full.tif")
-    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff")
+    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")
     c2 = np.argwhere((lab == C2) & (np.asarray(hem) == hv))
     z20 = int(np.median(c2[:, 0]))
     zw = (z20 - lo[0]) * UP + UP // 2  # working-grid (10 um) plane inside the crop
     n1, n2 = G.shape[1] // UP, G.shape[2] // UP
     sl = (z20, slice(lo[1], lo[1] + n1), slice(lo[2], lo[2] + n2))
-    img = ndimage.zoom(np.asarray(tifffile.memmap(cfg.ds_file(reg, 0))[sl]).astype(np.float32), UP, order=1)
-    atl = ndimage.zoom(np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff")[sl]), UP, order=0)
+    img = ndimage.zoom(np.asarray(tifffile.memmap(cfg.ds_file(reg, 0), mode="r")[sl]).astype(np.float32), UP, order=1)
+    atl = ndimage.zoom(np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")[sl]), UP, order=0)
     L = ndimage.zoom(np.where(np.asarray(hem[sl]) == hv, lab[sl], 0), UP, order=0)
     g = G[zw]
     m = (L > 0) | np.isfinite(g[..., 0])

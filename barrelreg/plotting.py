@@ -99,8 +99,8 @@ def overview_figure(cfg, bid, met):
     reg = cfg.reg_dir(bid)
     od = cfg.brain_dir(bid)
     lab = tifffile.imread(f"{od}/barrels_corrected_full.tif")
-    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff")
-    ch0 = tifffile.memmap(cfg.ds_file(reg, 0))
+    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")
+    ch0 = tifffile.memmap(cfg.ds_file(reg, 0), mode="r")
     fig, ax = plt.subplots(3, 2, figsize=(16, 20), facecolor="k", gridspec_kw=dict(height_ratios=[1.15, 1, 1]))
     for a in ax.ravel():
         a.axis("off")
@@ -137,7 +137,7 @@ def overview_figure(cfg, bid, met):
             ax[i, j].imshow(img, cmap="gray", vmin=vmin, vmax=vmax, interpolation="nearest")
             ax[i, j].set_xlim(x0, x1)
             ax[i, j].set_ylim(y1, y0)
-        iso = np.isin(np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff")[z]), ISO_IDS)
+        iso = np.isin(np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")[z]), ISO_IDS)
         ax[2, j].contour(ndimage.binary_opening(iso, iterations=1), [0.5], colors=["#00E5FF"], linewidths=1.3,
                          linestyles="--")  # registered isocortex outline (pia / white matter)
         for k in np.unique(L[y0:y1, x0:x1])[1:]:

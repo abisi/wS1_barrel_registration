@@ -49,7 +49,7 @@ def downsampled_points(cfg, bid):
     js = json.load(open(f"{reg}/brainreg.json"))
     src = bgs.AnatomicalSpace(js["orientation"], shape=tifffile.TiffFile(cfg.raw_ch0(bid)).series[0].shape,
                               resolution=[float(v) for v in js["voxel_sizes"]])
-    dst = bgs.AnatomicalSpace("asr", shape=tifffile.memmap(cfg.ds_file(reg, 0)).shape, resolution=(cfg.voxel_um,) * 3)
+    dst = bgs.AnatomicalSpace("asr", shape=tifffile.memmap(cfg.ds_file(reg, 0), mode="r").shape, resolution=(cfg.voxel_um,) * 3)
     print(f"{bid}: no downsampled.points, mapping ch1.csv from raw space", flush=True)
     return src.map_points_to(dst, pd.read_csv(f"{cfg.cells_dir}/{bid}/ch1.csv")[["z", "y", "x"]].values)
 
@@ -66,19 +66,19 @@ def cells(cfg, bid, met):
     od = cfg.brain_dir(bid)
     P = downsampled_points(cfg, bid)
     v = np.rint(P).astype(int)
-    shape = np.array(tifffile.memmap(f"{reg}/registered_atlas.tiff").shape)
+    shape = np.array(tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r").shape)
     inb = (v >= 0).all(1) & (v < shape).all(1)
     fld = [tifffile.imread(f"{od}/ccf_field_{k}.tif") for k in range(3)]
     ccf = np.full((len(P), 3), np.nan)
     for k in range(3):
         ccf[inb, k] = fld[k][tuple(v[inb].T)] * 100.0  # mm -> 10 um CCF voxel
     ok = np.isfinite(ccf).all(1)
-    ann = tifffile.memmap(cfg.annotation)
+    ann = tifffile.memmap(cfg.annotation, mode="r")
     cv = np.clip(np.rint(ccf[ok]).astype(int), 0, np.array(ann.shape) - 1)
     sid = np.zeros(len(P), np.int64)
     sid[ok] = np.asarray(ann[tuple(cv.T)])
     ws1 = ok & np.isin(sid, BFD_IDS)
-    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff")
+    hem = tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")
     hv = np.zeros(len(P), int)
     hv[inb] = np.asarray(hem[tuple(v[inb].T)]) if inb.any() else 0
     lab = tifffile.imread(f"{od}/barrels_corrected_full.tif")

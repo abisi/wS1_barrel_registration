@@ -49,6 +49,7 @@ def brute_force(fix, mov, mask, pix, centre, topk=5, max_t=400, step_t=40, max_r
             tops.append(r)
         if len(tops) == topk:
             break
+    brute_force.last_all = np.array(res, np.float32)  # every placement scored (read by the debug dump)
     return tops
 
 
