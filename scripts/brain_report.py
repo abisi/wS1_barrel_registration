@@ -35,7 +35,7 @@ from matplotlib import patheffects
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 
-from barrelreg.atlas import BARREL_NAMES, BFD_IDS, C2, ISO_IDS, ROW_COL, S, SEPTA, collapse, row_of
+from barrelreg.atlas import BARREL_NAMES, BFD_IDS, C2, ISO_IDS, S, SEPTA, collapse, row_of
 from barrelreg.config import Config
 from barrelreg.imageproc import bandpass
 from barrelreg.register import CONTRAST_RANGE, PATTERN_RANGE, PIX
@@ -57,8 +57,12 @@ def name(k):
     return BARREL_NAMES[int(k) - 1] if 0 < int(k) <= len(BARREL_NAMES) else ""
 
 
+# row palette of the report (bright on a grey slab, row order as a hue sweep, straddlers white)
+PAL = {"A": "#FF6F6F", "B": "#FFB547", "C": "#B5E655", "D": "#4DD4E8", "E": "#A98BFF", "S": "#F2F2F2"}
+
+
 def rowcol(k):
-    return ROW_COL[row_of(name(k))]
+    return PAL[row_of(name(k))]
 
 
 ROW_LABEL = {"A": "row A", "B": "row B", "C": "row C", "D": "row D", "E": "row E", "S": "straddlers"}
@@ -126,7 +130,7 @@ def flat_panel(ax, img, valid, box, cols=None, cols_ghost=None, signed=False, ti
 
 
 def row_legend(ax, fs=8):
-    h = [Line2D([], [], color=ROW_COL[r], lw=2, label=ROW_LABEL[r]) for r in "ABCDES"]
+    h = [Line2D([], [], color=PAL[r], lw=2, label=ROW_LABEL[r]) for r in "ABCDES"]
     ax.legend(handles=h, loc="lower right", fontsize=fs, frameon=True, facecolor="black", edgecolor="none",
               labelcolor="w", framealpha=0.6, handlelength=1.2)
 
@@ -148,23 +152,18 @@ def flat_views(D, p, cols, cols_new, out_dir, tag):
         "overlay": dict(img=l4, valid=valid, cols=cols_new, cols_ghost=cols, names=False,
                         title="refined (solid) vs brainreg (dashed)"),
     }
-    plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "DejaVu Sans"], "svg.fonttype": "none"})
+    plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "DejaVu Sans"], "svg.fonttype": "none",
+                         "pdf.fonttype": 42})
     for key, kw in views.items():
         fig = plt.figure(figsize=(4, 4))
         ax = fig.add_axes([0, 0, 1, 0.93])
         flat_panel(ax, box=box, **kw)
-        if key == "overlay":
-            for k in np.unique(cols_new):
-                if 0 < k < SEPTA and (cols == k).any():
-                    a, b = np.argwhere(cols == k).mean(0), np.argwhere(cols_new == k).mean(0)
-                    ax.annotate("", xy=(b[1], b[0]), xytext=(a[1], a[0]),
-                                arrowprops=dict(arrowstyle="-|>", color="w", lw=0.8, mutation_scale=7))
         if key in ("slab_refined", "overlay"):
             row_legend(ax, 7)
         for ext in ("png", "pdf", "svg"):
             fig.savefig(f"{out_dir}/{tag}_{key}.{ext}", dpi=300, facecolor="white")
         plt.close(fig)
-    plt.rcParams.update({"svg.fonttype": "path"})
+    plt.rcParams.update({"svg.fonttype": "path", "pdf.fonttype": 3})
     return box, l4, valid, v2, bp
 
 
@@ -624,7 +623,7 @@ def report(cfg, bid, hv, tracks, out_pdf):
         fig = page(pdf, "Flat L4 view: brainreg vs refined registration",
                    f"Square crops of the flat L4 slab (offset {d_off} um from the L4 bottom; background flattened by the ratio to a 300 um Gaussian), barrel outlines coloured "
                    f"by row. Top: slab; bottom: band-passed slab (artefacts masked). Bottom right: refined outlines "
-                   f"(solid) over brainreg (dashed), arrows = shift of each barrel centre. Each panel is also saved "
+                   f"(solid) over brainreg (dashed). Each panel is also saved "
                    f"as png / pdf / svg in {fv_dir}.")
         fig.subplots_adjust(left=0.02, right=0.98, top=0.86, bottom=0.02, wspace=0.04, hspace=0.12)
         for i, (img, vv, lab, ghost, sg, t) in enumerate((
@@ -638,12 +637,6 @@ def report(cfg, bid, hv, tracks, out_pdf):
             flat_panel(ax, img, vv, box, cols=lab, cols_ghost=ghost, signed=sg, title=t, fs=7, names=i != 5)
             if i == 2:
                 row_legend(ax, 8)
-            if i == 5:
-                for k in np.unique(cols_new):
-                    if 0 < k < SEPTA and (cols == k).any():
-                        a_, b_ = np.argwhere(cols == k).mean(0), np.argwhere(cols_new == k).mean(0)
-                        ax.annotate("", xy=(b_[1], b_[0]), xytext=(a_[1], a_[0]),
-                                    arrowprops=dict(arrowstyle="-|>", color="w", lw=0.8, mutation_scale=7))
         done(pdf, fig)
 
         # ---------------------------------------------------------------- 9 3D

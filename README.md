@@ -186,8 +186,8 @@ probe under brainreg and under D2.
 
 The report also saves square publication panels of the flat L4 slab in `reports/flat_views/` (png 300 dpi, pdf, svg
 with editable text): slab alone, slab with the brainreg barrels, slab with the refined barrels, the same two on the
-band-passed slab, and refined (solid) over brainreg (dashed) with the shift of each barrel centre. The slab is
-background-flattened (ratio to a 300 um Gaussian); outlines are coloured by row (A-E, straddlers), with a 500 um bar.
+band-passed slab, and refined (solid) over brainreg (dashed). The slab is
+background-flattened (ratio to a 300 um Gaussian); outlines are coloured by row (A-E as a hue sweep, straddlers white), with a 500 um bar.
 
 Rescue runs (hemispheres that failed with the default slab choice): `BARRELREG_CH=1` fits on image channel 1 instead
 of 0, and `BARRELREG_FIT_OFFSETS=-250,-200,-150,-100,-50,0,50` fits the L4 slab at each of these offsets (um from the
