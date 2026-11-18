@@ -35,7 +35,7 @@ FAIL = 0.3
 RULE = ("Selection per left hemisphere: the primary run (default search, slab fitted at 7 depths plus the automatic "
         "picks, depth chosen by barrel contrast, ch0) if its contrast after warping is >= 0.3; otherwise the passing "
         "run with the highest contrast among wide search ch0, default search ch1 and wide search ch1 (same depths and "
-        "depth rule); otherwise the primary run, flagged failed. Reference = Lana Smith's settings (default search, "
+        "depth rule) and the reference settings; otherwise the primary run, flagged failed. Reference = Lana Smith's settings (default search, "
         "automatic slab picks, ch0), rerun with the debug dump. Contrast is the pass criterion and the selection score, "
         "so each rescue below needs a visual check: the refined outlines should sit on the image barrels and the "
         "names should follow the rows.")
