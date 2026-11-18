@@ -194,7 +194,9 @@ background-flattened (ratio to a 300 um Gaussian); outlines are coloured by row 
 
 Rescue runs (hemispheres that failed with the default slab choice): `BARRELREG_CH=1` fits on image channel 1 instead
 of 0, and `BARRELREG_FIT_OFFSETS=-250,-200,-150,-100,-50,0,50` fits the L4 slab at each of these offsets (um from the
-L4 bottom) instead of the contrast / pattern picks; the fit with most matched barrels wins.
+L4 bottom) in addition to the automatic contrast / pattern picks. `BARRELREG_PICK` chooses among the fitted depths:
+`matches` (default, most matched barrels) or `contrast` (highest barrel-vs-septum contrast of the depth's fit; in a test
+on 10 brains it never did worse than `matches` and fixed hemispheres where a wrong depth had more matches).
 
 `BARRELREG_SEARCH=wide` widens the pattern search (rotation +-30 deg by 3, scale 0.6-1.5 by 0.1, shift +-800 um by
 50 um, 8 candidates) and polishes each candidate on a fine local grid (scale +-0.05, rotation +-3 deg, shift +-50 um).

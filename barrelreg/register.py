@@ -50,6 +50,7 @@ OFFSETS_UM = list(range(-300, 75, 25))  # slab centre relative to the image L4 b
 # rescue runs: BARRELREG_CH = image channel (default 0); BARRELREG_FIT_OFFSETS = comma list of L4 offsets (um) fitted
 # instead of the contrast / pattern picks (the fit with most matched barrels wins, as for the two picks)
 IMG_CH = int(os.environ.get("BARRELREG_CH", "0"))
+PICK = os.environ.get("BARRELREG_PICK", "matches")  # how to choose among fitted slab depths: matches | contrast
 FIT_OFFSETS = [int(v) for v in os.environ.get("BARRELREG_FIT_OFFSETS", "").split(",") if v.strip()]
 # Offsets searched for the best band-pass contrast and for the best match to the barrel pattern. Over 36 AB/MH
 # hemispheres the contrast peaked at -25 / -50 um in 33; the 2 peaks at -200 / -250 um were L2/3 texture (AB082 left
@@ -382,22 +383,31 @@ def run_hemi(cfg, bid, hv, od):
         bar0 = (best["wl"] > 0) & (best["wl"] < SEPTA)
         same = [c for c in cands if c is not best and (c["wl"][bar0] == best["wl"][bar0]).mean() >= 0.7]
         other = [c["corr"] for c in cands if c is not best and not any(c is s for s in same)]
-        return dict(d4=d4, l4=l4, valid=valid, art=art, v2=v2, bpA=bpA, blobs=blobs, Bc=Bc, best=best,
+        # barrel-core vs septum contrast of the chosen candidate at this depth (as contrast_after, before the final TPS)
+        cw = np.where(best["wl"] < SEPTA, best["wl"], 0)
+        con_fit = ps.sep_contrast(bpA, cw, v2 & ndimage.binary_dilation((cols > 0) | (cw > 0), iterations=5))
+        dbg(p, fit_contrast=con_fit)
+        return dict(d4=d4, contrast=con_fit, l4=l4, valid=valid, art=art, v2=v2, bpA=bpA, blobs=blobs, Bc=Bc, best=best,
                     n_agree=1 + len(same), n_cands=len(cands), margin=best["corr"] - max(other) if other else np.nan,
                     search_top=[round(t[0], 3) for t in tops], cand_corr=[round(c["corr"], 3) for c in cands])
 
     d_con, d_pat = max(con, key=con.get), max(pat, key=pat.get)
     fits = []
-    for d in sorted(FIT_OFFSETS or {d_con, d_pat}):
+    fit_offsets = sorted(set(FIT_OFFSETS) | {d_con, d_pat})  # the automatic contrast / pattern picks always included
+    for d in fit_offsets:
         try:
             fits.append(fit_at(d))
         except RuntimeError as e:
             print(f"  h{hv}: {e}", flush=True)
-    dbg(fit_offsets=sorted(FIT_OFFSETS or {d_con, d_pat}), img_ch=IMG_CH,
+    dbg(fit_offsets=fit_offsets, img_ch=IMG_CH,
         search_params=[MAX_T, STEP_T, MAX_R, STEP_R, min(SCALES), max(SCALES), TOPK, int(REFINE)])
     if not fits:
         raise RuntimeError("no L4 offset gave a fit")
-    W = max(fits, key=lambda w: (len(w["best"]["ia"]), w["best"]["corr"]))
+    if PICK == "contrast":  # depth whose fit separates barrels from septa best
+        W = max(fits, key=lambda w: (w["contrast"], len(w["best"]["ia"])))
+    else:  # default: most matched barrels
+        W = max(fits, key=lambda w: (len(w["best"]["ia"]), w["best"]["corr"]))
+    depth_fits = {str(w["d4"]): dict(n_matched=len(w["best"]["ia"]), contrast=round(w["contrast"], 3)) for w in fits}
     print(f"  h{hv} L4 offset candidates: contrast {d_con} um, pattern {d_pat} um -> using {W['d4']} um "
           f"(L4 bottom median {np.median(bot[foot]):.0f} um below the image pia)", flush=True)
     d_off, v2, art, bpA, blobs, Bc, best = (W[k] for k in ("d4", "v2", "art", "bpA", "blobs", "Bc", "best"))
@@ -493,7 +503,8 @@ def run_hemi(cfg, bid, hv, od):
                wm_registered_thickness_um=float(np.median(bw_thick[foot])),
                n_blobs=len(Bc), n_atlas=len(Ac), n_matched=len(ia), search_top=W["search_top"], cand_corr=W["cand_corr"],
                search_best=dict(corr=sc_[0], scale=sc_[1], rot_deg=sc_[2], shift_um=[sc_[3], sc_[4]]),
-               offset_candidates_um=sorted({d_con, d_pat}), n_candidates_agree=n_agree, margin_to_other_naming=margin,
+               offset_candidates_um=sorted({d_con, d_pat}), depth_fits=depth_fits, depth_pick=PICK,
+               n_candidates_agree=n_agree, margin_to_other_naming=margin,
                tps_smoothing=s_best, affine_residual_um=best["affres"],
                depth_contrast={str(k): round(v, 3) for k, v in con.items()},
                depth_pattern={str(k): round(v, 3) for k, v in pat.items()},
