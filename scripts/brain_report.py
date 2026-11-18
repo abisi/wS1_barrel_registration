@@ -78,8 +78,7 @@ def draw(ax, cols, lw=1.0, names=True, fs=8, ls="-", alpha=1.0):
         ax.contour(m, [0.5], colors=[rowcol(k)], linewidths=lw, linestyles=ls, alpha=alpha)
         if names:
             cy, cx = np.argwhere(cols == k).mean(0)
-            ax.text(cx, cy, name(k), color=rowcol(k), fontsize=fs, ha="center", va="center", weight="bold",
-                    path_effects=[patheffects.withStroke(linewidth=1.4, foreground="black")])
+            ax.text(cx, cy, name(k), color=rowcol(k), fontsize=fs, ha="center", va="center", weight="bold")
 
 
 def flatten(img, valid, sigma=30, fine=0.8):
