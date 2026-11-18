@@ -663,7 +663,9 @@ def report(cfg, bid, hv, tracks, out_pdf):
             ax.plot(t[2], int(np.argmin(np.abs(scs - t[1]))), "r+", ms=10)
         ax = fig.add_subplot(2, 3, 4)
         b = tops[0]
-        mm = np.isclose(sa[:, 1], b[1], atol=1e-3) & np.isclose(sa[:, 2], b[2], atol=1e-3)
+        # nearest coarse-grid scale / rotation (a refined top lies between grid points)
+        s0, a0 = scs[np.argmin(np.abs(scs - b[1]))], angs[np.argmin(np.abs(angs - b[2]))]
+        mm = np.isclose(sa[:, 1], s0, atol=1e-3) & np.isclose(sa[:, 2], a0, atol=1e-3)
         dys, dxs = np.unique(sa[mm, 3]), np.unique(sa[mm, 4])
         G = np.full((len(dys), len(dxs)), np.nan)
         for r in sa[mm]:
@@ -673,7 +675,7 @@ def report(cfg, bid, hv, tracks, out_pdf):
         ax.plot(0, 0, "wo", ms=5)
         ax.set_xlabel("shift, flat axis 2 (um)")
         ax.set_ylabel("shift, flat axis 1 (um)")
-        ax.set_title(f"correlation over shifts at scale {b[1]:.1f}, rotation {b[2]:.1f}")
+        ax.set_title(f"correlation over shifts at scale {s0:.2f}, rotation {a0:.1f}")
         plt.colorbar(im, ax=ax, fraction=0.04)
         fix = D[p + "fix"]
         for j, t in enumerate(tops[:4]):
