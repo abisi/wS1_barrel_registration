@@ -1,11 +1,9 @@
-"""Paper figure for one brain and one Neuropixels track (2 x 3 grid, panels a-f):
+"""Paper figure for one brain and one Neuropixels track (2 x 2 grid, panels a-d):
   a  flat L4 view, brainreg (global) barrels, signal channel (probe dye) and the track's L4 crossing
-  b  empty (placeholder)
-  c  flat L4 view, refined (D2) barrels, same crop
-  d  coronal slice through the track's L4 crossing, centred on the track: ch0 + probe dye, D2 barrel columns (solid)
+  b  flat L4 view, refined (D2) barrels, same crop
+  c  coronal slice through the track's L4 crossing, centred on the track: ch0 + probe dye, D2 barrel columns (solid)
      and brainreg columns (dashed)
-  e  barrel along the probe vs depth below the pia, brainreg and D2, with the cortical layers
-  f  empty (placeholder)
+  d  barrel along the probe vs depth below the pia, brainreg and D2, with the cortical layers
 Needs a run made with BARRELREG_DEBUG=1 (results/h<hv>/debug.npz + debug3d.npz).
 
 usage: python scripts/paper_figure.py -c RUN/config.toml AB164 --tracks tracks_summary.csv [--track imec2] [--out DIR]
@@ -115,7 +113,7 @@ def main():
         sys.exit(f"{bid} h{hv}: no wS1 track")
     tname, X, q = trk[0]
 
-    # L4 crossing of the track: flat position (a, c) and voxel (d)
+    # L4 crossing of the track: flat position (a, b) and voxel (c)
     Fq, rq = F[tuple(q.T)], rel[tuple(q.T)]
     k4 = np.isfinite(Fq).all(1) & (np.abs(rq - d_off) < 60)
     cross = [tuple((Fq[k4] - flat_lo).mean(0) / PIX - 0.5)] if k4.any() else []
@@ -124,29 +122,27 @@ def main():
 
     plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "DejaVu Sans"], "font.size": 7,
                          "svg.fonttype": "none", "pdf.fonttype": 42, "axes.linewidth": 0.6})
-    W, H = 7.2, 5.3  # in, 2 x 3 square panels + legend strip at the bottom
+    W, H = 4.9, 5.5  # in, 2 x 2 square panels + legend strip at the bottom
     fig = plt.figure(figsize=(W, H))
-    side, gap, left = 2.0, 0.42, 0.33  # in
+    side, gap, left = 2.0, 0.55, 0.3  # in
     pw, ph = side / W, side / H
-    xs = [(left + i * (side + gap)) / W for i in range(3)]
+    xs = [(left + i * (side + gap)) / W for i in range(2)]
     ys = [(H - 0.25 - side) / H, (H - 0.25 - 2 * side - 0.38) / H]
-    ax = {k: fig.add_axes([xs[i % 3], ys[i // 3], pw, ph]) for i, k in enumerate("abcdef")}
+    ax = {k: fig.add_axes([xs[i % 2], ys[i // 2], pw, ph]) for i, k in enumerate("abcd")}
 
-    # ---------------------------------------------------------------- a, c: flat L4 views
+    # ---------------------------------------------------------------- a, b: flat L4 views
     sig = signal_flat(sig3, F, region & (V["v_hemi"] > 0), flat_lo, D[p + "l4"].shape)
     valid = D[p + "valid"]
     l4 = flatten(D[p + "l4"], valid)
     box = square_box((cols > 0) | (cols_new > 0))
     blobs = D[p + "blobs"]
     ref = np.where(np.isin(blobs, np.asarray(D["ib"]) + 1), blobs, 0)
-    for k, lab, t, ls in (("a", cols, "brainreg (global)", "dashed"), ("c", cols_new, "refined (local)", "-")):
+    for k, lab, t, ls in (("a", cols, "brainreg (global)", "dashed"), ("b", cols_new, "refined (local)", "-")):
         flat_panel(ax[k], l4, valid, box, cols=lab, names=True, title=t, fs=5.5, bar=k == "a", ref=ref, ls=ls,
                    sig=sig, cross=cross)
         ax[k].title.set_fontsize(8)
-    for k in "bf":
-        ax[k].axis("off")
 
-    # ---------------------------------------------------------------- d: coronal slice centred on the track
+    # ---------------------------------------------------------------- c: coronal slice centred on the track
     # centre: probe-dye centroid (ch1, top 0.5 %) within 400 um of the track's L4 crossing, else the crossing
     hw = int(a.half_width_um / VOX)
     r_ = int(400 / VOX)
@@ -161,7 +157,7 @@ def main():
     img = ch0[z4, y0:y1, x0:x1]
     s1 = sig3[z4, y0:y1, x0:x1]
     vlo, vhi = np.nanpercentile(img, (1, 99.5))
-    axd = ax["d"]
+    axd = ax["c"]
     axd.imshow(img, cmap="gray", vmin=vlo, vmax=vhi, interpolation="bilinear")
     slo, shi = np.nanpercentile(s1, (50, 99.9))
     s = np.clip((s1 - slo) / max(shi - slo, 1e-6), 0, 1)
@@ -182,8 +178,8 @@ def main():
         sp_.set_visible(False)
     axd.set_title(f"coronal, track {tname} at L4", fontsize=8)
 
-    # ---------------------------------------------------------------- e: barrel along the probe
-    axe = ax["e"]
+    # ---------------------------------------------------------------- d: barrel along the probe
+    axe = ax["d"]
     dq = depth[tuple(q.T)].astype(float)
     acr = [ACR.get(int(v), "") for v in atl[tuple(q.T)]]
     lay = np.array([m.group(1) if (m := re.search(r"(1|2/3|4|5|6a|6b)$", s_)) and s_.startswith("SSp") else ""
@@ -233,16 +229,16 @@ def main():
         axe.spines[sp_].set_visible(False)
     axe.set_title("barrel along the probe", fontsize=8)
 
-    # legend: one strip under the grid (b and f stay empty)
+    # legend: one strip under the grid
     h = [Line2D([], [], color=PAL[r], lw=1.5, label=ROW_LABEL[r]) for r in "ABCDES"]
     h += [Line2D([], [], color="0.3", lw=1.0, ls="--", label="brainreg"),
           Line2D([], [], color="0.3", lw=1.0, label="refined"),
           Line2D([], [], color="0.7", lw=0.8, label="image barrels"),
           Patch(color=SIG_COL, alpha=0.7, label="probe dye (ch1)"),
           Line2D([], [], ls="", marker="o", mfc="none", mec=SIG_COL, mew=1.0, ms=5, label="track L4 crossing")]
-    fig.legend(handles=h, loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=6, fontsize=6, frameon=False,
+    fig.legend(handles=h, loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=6, frameon=False,
                handlelength=1.6, columnspacing=1.2)
-    for k in "abcdef":
+    for k in "abcd":
         letter(fig, ax[k], k)
     rd = a.out or cfg.report_dir(bid)
     os.makedirs(rd, exist_ok=True)
