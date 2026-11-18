@@ -925,18 +925,18 @@ def main():
     ap.add_argument("brains", nargs="+")
     ap.add_argument("--hemisphere", type=int, choices=[1, 2], help="default: every hemisphere with a debug dump")
     ap.add_argument("--tracks")
-    ap.add_argument("--out")
+    ap.add_argument("--out", help="default: <work_dir>/<brain>/report")
     a = ap.parse_args()
     cfg = Config(a.config)
     tracks = pd.read_csv(a.tracks) if a.tracks else None
-    out = a.out or f"{cfg.work_dir}/reports"
     for b in a.brains:
         hvs = [a.hemisphere] if a.hemisphere else [h for h in (1, 2)
                                                    if os.path.exists(f"{cfg.brain_dir(b)}/h{h}/debug.npz")]
-        os.makedirs(f"{out}/{b}", exist_ok=True)  # one folder per mouse: report + flat-view figures
+        rd = f"{a.out}/{b}" if a.out else cfg.report_dir(b)
+        os.makedirs(rd, exist_ok=True)  # one folder per brain: report + flat-view figures
         for hv in hvs:
             try:
-                report(cfg, b, hv, tracks, f"{out}/{b}/{b}_h{hv}_D2_report.pdf")
+                report(cfg, b, hv, tracks, f"{rd}/{b}_h{hv}_D2_report.pdf")
             except Exception:
                 import traceback
                 traceback.print_exc()

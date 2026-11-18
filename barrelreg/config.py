@@ -8,6 +8,15 @@ import pandas as pd
 import tifffile
 
 
+
+
+def results_dir(run_dir, bid):
+    """<run>/<brain>/results; runs written before the results/report split (e.g. D2_neuropixels) have <run>/<brain>."""
+    new = f"{run_dir}/{bid}/results"
+    if not os.path.isdir(new) and any(os.path.isdir(f"{run_dir}/{bid}/h{h}") for h in (1, 2)):
+        return f"{run_dir}/{bid}"
+    return new
+
 class Config:
     def __init__(self, path):
         with open(path, "rb") as f:
@@ -52,7 +61,16 @@ class Config:
         return f"{self.atlas_dir}/annotation.tiff"
 
     def brain_dir(self, bid):
-        return f"{self.work_dir}/{bid}"
+        """Fit outputs of a brain: <work_dir>/<brain>/results (h1/, h2/, volumes); figures go to report_dir."""
+        return results_dir(self.work_dir, bid)
+
+    def report_dir(self, bid):
+        return f"{self.work_dir}/{bid}/report"
+
+    def flat_fit_png(self, bid, hv):
+        """Flat-fit figure of a hemisphere: report/ (new layout) or results/h<hv>/ (older runs)."""
+        new = f"{self.report_dir(bid)}/{bid}_h{hv}_flat_fit.png"
+        return new if os.path.exists(new) else f"{self.brain_dir(bid)}/h{hv}/{bid}_h{hv}_flat_fit.png"
 
     def reg_dir(self, bid):
         """brainreg output folder of this brain (its row in registration_params fills the pattern)."""

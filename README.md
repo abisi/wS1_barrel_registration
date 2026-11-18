@@ -117,16 +117,19 @@ A hemisphere takes about 9 minutes on the shared server (median over 42), so 15�
 
 ## Outputs (`work_dir/`)
 
+One folder per brain: `<ID>/results/` (fit outputs) and `<ID>/report/` (report PDF and figures). Runs made
+before this split (e.g. Lana Smith's D2_neuropixels) have the results directly in `<ID>/`; the scripts read both.
+
 | File | Content |
 |---|---|
-| `<ID>/barrels_corrected_full.tif` | uint8 barrel index, same grid as the downsampled ch0 (both hemispheres). Names in `barrel_index.csv`: 1–29 = A1…E8, then Alpha, Beta, Delta, Gamma. |
-| `<ID>/ccf_field_{0,1,2}.tif` | CCF position in mm, brainreg's deformation-field convention for the 10 µm Allen atlas (voxel = value × 100). NaN outside the barrel-field columns. |
-| `<ID>/h<1\|2>/metrics.json` | fit quality (see QC) and parameters |
-| `<ID>/h<1\|2>/flatcoords.npz` | flat coordinate of every working voxel (raw and corrected); L4 bottom (image and atlas) and white-matter depth per flat pixel |
-| `<ID>/h<1\|2>/l4_bottom_patches.csv` | L4 bottom per 100 µm flat patch (raw = own peak, NaN where none was found) |
-| `<ID>/h<1\|2>/<ID>_h<hv>_flat_fit.png` | flat L4 view: initial placement / matches / corrected barrels |
-| `<ID>/<ID>_coronal.png`, `<ID>/<ID>_D2_overview.png` | coronal slices through C2; per-mouse overview |
-| `<ID>/<ID>_wS1_cells_ccf.csv` | cells in SSp-bfd: CCF voxel / µm, structure, barrel, layer, `fit_ok` |
+| `<ID>/results/barrels_corrected_full.tif` | uint8 barrel index, same grid as the downsampled ch0 (both hemispheres). Names in `barrel_index.csv`: 1–29 = A1…E8, then Alpha, Beta, Delta, Gamma. |
+| `<ID>/results/ccf_field_{0,1,2}.tif` | CCF position in mm, brainreg's deformation-field convention for the 10 µm Allen atlas (voxel = value × 100). NaN outside the barrel-field columns. |
+| `<ID>/results/h<1\|2>/metrics.json` | fit quality (see QC) and parameters |
+| `<ID>/results/h<1\|2>/flatcoords.npz` | flat coordinate of every working voxel (raw and corrected); L4 bottom (image and atlas) and white-matter depth per flat pixel |
+| `<ID>/results/h<1\|2>/l4_bottom_patches.csv` | L4 bottom per 100 µm flat patch (raw = own peak, NaN where none was found) |
+| `<ID>/report/<ID>_h<hv>_flat_fit.png` | flat L4 view: initial placement / matches / corrected barrels |
+| `<ID>/report/<ID>_coronal.png`, `<ID>/report/<ID>_D2_overview.png` | coronal slices through C2; per-mouse overview |
+| `<ID>/results/<ID>_wS1_cells_ccf.csv` | cells in SSp-bfd: CCF voxel / µm, structure, barrel, layer, `fit_ok` |
 | `summary.csv`, `contact_sheet_D2.png` | one row / tile per hemisphere |
 | `all_mice_wS1_cells_ccf.csv`, `wS1_cell_counts.csv` | cells over all exported mice |
 
@@ -174,8 +177,8 @@ Known limits:
 ## Step-by-step report per brain
 
 ```bash
-BARRELREG_DEBUG=1 python -m barrelreg -c config.toml run MS261 --hemisphere 1   # also saves h1/debug.npz + debug3d.npz
-python scripts/brain_report.py -c config.toml MS261 --tracks tracks_summary.csv  # work_dir/reports/<ID>_h1_D2_report.pdf
+BARRELREG_DEBUG=1 python -m barrelreg -c config.toml run MS261 --hemisphere 1   # also saves results/h1/debug.npz + debug3d.npz
+python scripts/brain_report.py -c config.toml MS261 --tracks tracks_summary.csv  # work_dir/<ID>/report/<ID>_h1_D2_report.pdf
 ```
 
 `BARRELREG_DEBUG=1` saves every intermediate step of each hemisphere (about 250 MB per hemisphere; the fit is
@@ -184,7 +187,7 @@ bottom, slab choice and image barrels, the search landscape and top placements, 
 the warp, the 3D columns and depth mapping, and, with `--tracks`, each Neuropixels wS1 track with its barrels along the
 probe under brainreg and under D2.
 
-The report also saves square publication panels of the flat L4 slab in `reports/flat_views/` (png 300 dpi, pdf, svg
+The report also saves square publication panels of the flat L4 slab in `<ID>/report/` (png 300 dpi, pdf, svg
 with editable text): slab alone, slab with the brainreg barrels, slab with the refined barrels, the same two on the
 band-passed slab, and brainreg (global, left) and refined (right) side by side (`_side_by_side`). The slab is
 background-flattened (ratio to a 300 um Gaussian); outlines are coloured by row (A-E as a hue sweep, straddlers magenta; brainreg dashed, refined solid, matched image barrels thin white as reference, barrel names). `_side_by_side_signal` adds the signal channel (ch1, probe dye, red: 99th percentile through each column) and, with `--tracks`, a ring at each track's L4 crossing, with a 500 um bar.
@@ -195,7 +198,7 @@ L4 bottom) instead of the contrast / pattern picks; the fit with most matched ba
 
 `BARRELREG_SEARCH=wide` widens the pattern search (rotation +-30 deg by 3, scale 0.6-1.5 by 0.1, shift +-800 um by
 50 um, 8 candidates) and polishes each candidate on a fine local grid (scale +-0.05, rotation +-3 deg, shift +-50 um).
-`scripts/brain_report.py` writes one folder per mouse (`reports/<ID>/`: report PDF of each hemisphere with a debug dump,
+`scripts/brain_report.py` writes into each brain's `<ID>/report/` (report PDF of each hemisphere with a debug dump,
 plus the flat-view figures); every page explains what the step does, why, and how to read the panels.
 
 ## Check against a previous run

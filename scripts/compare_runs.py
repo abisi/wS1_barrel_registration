@@ -32,7 +32,8 @@ KEEP = ["contrast_initial", "contrast_after", "n_matched", "n_blobs", "dice_afte
 
 def load(run):
     rows = []
-    for f in glob.glob(f"{run}/*/h[12]/metrics.json"):
+    # <run>/<brain>/results/h*/ (new layout) or <run>/<brain>/h*/ (older runs, e.g. D2_neuropixels)
+    for f in glob.glob(f"{run}/*/results/h[12]/metrics.json") + glob.glob(f"{run}/*/h[12]/metrics.json"):
         m = json.load(open(f))
         r = {k: m.get(k) for k in KEEP}
         sb = m.get("search_best") or {}

@@ -131,7 +131,7 @@ def export(cfg, bid, do_cells=True, copy_to=None):
         for f in files:
             copy(f, f"{copy_to}/{bid}/{os.path.basename(f)}")
         for hv in met:
-            for f in glob.glob(f"{od}/h{hv}/*.json") + glob.glob(f"{od}/h{hv}/*.png"):
+            for f in glob.glob(f"{od}/h{hv}/*.json") + [cfg.flat_fit_png(bid, hv)]:
                 copy(f, f"{copy_to}/{bid}/h{hv}_{HEMI[hv]}/{os.path.basename(f)}")
     return summ
 

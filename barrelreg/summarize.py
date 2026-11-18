@@ -20,7 +20,7 @@ def summarize(cfg, ids, fail_contrast=0.3):
                 continue
             m = json.load(open(f))
             rows.append({k: m.get(k) for k in COLUMNS})
-            png = f"{cfg.brain_dir(b)}/h{hv}/{b}_h{hv}_flat_fit.png"
+            png = cfg.flat_fit_png(b, hv)
             if os.path.exists(png):
                 pngs.append(png)
                 tag = " FAILED" if m["contrast_after"] < fail_contrast else " ambiguous" if m["naming_ambiguous"] else ""

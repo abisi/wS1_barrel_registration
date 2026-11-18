@@ -506,7 +506,8 @@ def run_hemi(cfg, bid, hv, od):
                ccf_label_agreement=ccf_agree, ccf_c2_in_c2=ccf_c2, ccf_defined_frac=float(ok.mean()),
                seconds=round(time.time() - t0))
     json.dump(met, open(f"{od}/metrics.json", "w"), indent=1, default=float)
-    flat_fit_figure(f"{bid}_h{hv}", od, bpA, v2, art, cols, cols_new, blobs, Ac, Bc, ia, ib, met)
+    os.makedirs(cfg.report_dir(bid), exist_ok=True)
+    flat_fit_figure(f"{bid}_h{hv}", cfg.report_dir(bid), bpA, v2, art, cols, cols_new, blobs, Ac, Bc, ia, ib, met)
     dbg_save(od)
     print(f"{bid} h{hv}: {len(ia)}/{len(Ac)} matched | err {met['err_initial_um']:.0f} -> LOO "
           f"{met['err_tps_loo_um']:.0f} um | contrast {met['contrast_initial']:.2f} -> {met['contrast_after']:.2f} | "
@@ -517,10 +518,12 @@ def run_hemi(cfg, bid, hv, od):
 
 
 def run(cfg, bid, hemispheres=(1, 2)):
-    """Both hemispheres of one brain -> barrels_corrected_full.tif, ccf_field_{0,1,2}.tif, h<hv>/, coronal figure."""
+    """Both hemispheres of one brain -> results/ (barrels_corrected_full.tif, ccf_field_{0,1,2}.tif, h<hv>/) and
+    report/ (flat-fit and coronal figures)."""
     t0 = time.time()
     od = cfg.brain_dir(bid)
     os.makedirs(od, exist_ok=True)
+    os.makedirs(cfg.report_dir(bid), exist_ok=True)
     names = f"{cfg.work_dir}/barrel_index.csv"
     if not os.path.exists(names):
         with open(names, "w") as f:
@@ -551,6 +554,6 @@ def run(cfg, bid, hemispheres=(1, 2)):
     tifffile.imwrite(f"{od}/barrels_corrected_full.tif", full, compression="zlib")
     for k in range(3):
         tifffile.imwrite(f"{od}/ccf_field_{k}.tif", ccf_full[..., k] / 100.0, compression="zlib")  # mm
-    coronal_figure(bid, tifffile.memmap(cfg.ds_file(reg, 0), mode="r"), full, f"{od}/{bid}_coronal.png")
+    coronal_figure(bid, tifffile.memmap(cfg.ds_file(reg, 0), mode="r"), full, f"{cfg.report_dir(bid)}/{bid}_coronal.png")
     print(f"{bid}: done, {len(mets)}/{len(hemispheres)} hemispheres ({time.time() - t0:.0f}s)", flush=True)
     return mets

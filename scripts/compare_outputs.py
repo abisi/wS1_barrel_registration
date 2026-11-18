@@ -10,22 +10,25 @@ import sys
 import numpy as np
 import tifffile
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from barrelreg.config import results_dir
+
 
 def main(a, b, ids):
     for bid in ids:
-        la = tifffile.imread(f"{a}/{bid}/barrels_corrected_full.tif")
-        lb = tifffile.imread(f"{b}/{bid}/barrels_corrected_full.tif")
+        la = tifffile.imread(f"{results_dir(a, bid)}/barrels_corrected_full.tif")
+        lb = tifffile.imread(f"{results_dir(b, bid)}/barrels_corrected_full.tif")
         lab = (la > 0) | (lb > 0)
         print(f"{bid}: labels identical {np.array_equal(la, lb)}; agreement over labelled voxels "
               f"{np.mean(la[lab] == lb[lab]):.4f}")
         for k in range(3):
-            fa = tifffile.imread(f"{a}/{bid}/ccf_field_{k}.tif")
-            fb = tifffile.imread(f"{b}/{bid}/ccf_field_{k}.tif")
+            fa = tifffile.imread(f"{results_dir(a, bid)}/ccf_field_{k}.tif")
+            fb = tifffile.imread(f"{results_dir(b, bid)}/ccf_field_{k}.tif")
             both = np.isfinite(fa) & np.isfinite(fb)
             print(f"  ccf_field_{k}: same NaN pattern {np.array_equal(np.isfinite(fa), np.isfinite(fb))}, "
                   f"max |diff| {np.abs(fa[both] - fb[both]).max() if both.any() else 0:.3g} mm")
         for hv in (1, 2):
-            fa, fb = f"{a}/{bid}/h{hv}/metrics.json", f"{b}/{bid}/h{hv}/metrics.json"
+            fa, fb = f"{results_dir(a, bid)}/h{hv}/metrics.json", f"{results_dir(b, bid)}/h{hv}/metrics.json"
             if not (os.path.exists(fa) and os.path.exists(fb)):
                 print(f"  h{hv}: metrics missing in {'a' if not os.path.exists(fa) else 'b'}")
                 continue

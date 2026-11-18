@@ -108,7 +108,7 @@ def overview_figure(cfg, bid, met):
         m = met.get(hv)
         status = "no fit" if m is None else ("FIT FAILED - do not use" if not m["fit_ok"] else
                                               "naming ambiguous - check" if m["naming_ambiguous"] else "")
-        png = f"{od}/h{hv}/{bid}_h{hv}_flat_fit.png"
+        png = cfg.flat_fit_png(bid, hv)
         if os.path.exists(png):
             im = plt.imread(png)
             ax[0, j].imshow(im[int(im.shape[0] * 0.09):, int(im.shape[1] * 0.67):])
@@ -160,7 +160,8 @@ def overview_figure(cfg, bid, met):
         title += f"  (brainreg be{p.bending_energy_weight} / gs{p.grid_spacing})"
     fig.suptitle(title, color="w", fontsize=16)
     plt.tight_layout(rect=(0, 0, 1, 0.97))
-    out = f"{od}/{bid}_D2_overview.png"
+    os.makedirs(cfg.report_dir(bid), exist_ok=True)
+    out = f"{cfg.report_dir(bid)}/{bid}_D2_overview.png"
     plt.savefig(out, dpi=80, facecolor="k")
     plt.close(fig)
     return out
