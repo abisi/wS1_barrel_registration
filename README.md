@@ -25,11 +25,13 @@ Per hemisphere:
 1. **Own flatmap.** Laplace depth between the registered pia and white matter → streamlines to L4 → flat coordinates
    on the L4 surface, following the brain's curvature.
 2. **Template.** The atlas L4 barrels (33, A1–E8 and Alpha–Delta) in the Blue Brain flatmap of the CCF.
-3. **L4 slab.** The L4/L5 boundary is found in the image per flat patch; slabs at fixed offsets above it are fitted and
-   the depth with the best barrel contrast is kept. Depth is measured below the closed image surface, so notches and
-   tears are bridged.
+3. **L4 slab.** The L4/L5 boundary is found in the image per flat patch; the slab at the offset with the best band-pass
+   contrast and the one best matching the barrel pattern are both fitted, and the fit with more matched barrels wins
+   (optionally more offsets, chosen by barrel contrast: `BARRELREG_FIT_OFFSETS`, `BARRELREG_PICK=contrast`). Depth is
+   measured below the closed image surface, so notches and tears are bridged.
 4. **Search.** Every similarity (scale, rotation, shift) of the barrel pattern is scored against the slab.
-5. **Matching.** CPD (affine, then non-rigid) → one-to-one matching → leave-one-out cleaning; contrast refinement.
+5. **Matching.** CPD (affine, then non-rigid) → one-to-one matching → leave-one-out cleaning (optionally followed by a
+   contrast refinement, `BARRELREG_CONTRAST_REFINE=1`).
 6. **Warp.** A thin-plate spline through the matches.
 7. **Back to 3D and CCF.** Each voxel takes the barrel whose flat convex hull contains it; depth is mapped per column
    (pia, L4 bottom, white matter); the inverse flatmap gives the CCF position.
@@ -99,7 +101,10 @@ scripts/run_variants.sh sharpen BASE REDO/variants <brains>            # + unsha
 scripts/run_variants.sh seeded  BASE REDO/variants --seeds seeds.json <brains>
 ```
 
-A hemisphere takes about 9 minutes per variant and 15–30 GB RAM.
+A hemisphere takes about 9 minutes per variant and 15–30 GB RAM. `run --hemisphere 1` fits one hemisphere, and
+`barrels_corrected_full.tif` and the CCF fields then contain that hemisphere only (the AB / MH runs are left only).
+`run_variants.sh` uses the AB / MH settings (wide search, slab offsets −350…+150 µm chosen by contrast, contrast
+refinement); plain `run` uses the package defaults (±20° / 0.7–1.4 / ±600 µm search, two slab offsets, most matches).
 
 ## Review and export
 
