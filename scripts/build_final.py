@@ -2,7 +2,10 @@
 otherwise the passing run with the highest contrast, otherwise the primary run (kept, flagged failed).
 
 usage: python scripts/build_final.py --runs LABEL=DIR [LABEL=DIR ...] --out DIR [--ref DIR] [--hemisphere 1]
-The first run is the primary. Each chosen <run>/<ID>/results/ is copied to <out>/<ID>/results/ with source.json
+                                     [--score contrast_both]
+The first run is the primary. With --score contrast_both (runs that score each fit on both image channels) there is
+no primary: the variant with the highest mean ch0 / ch1 contrast is chosen, and a hemisphere passes when its chosen fit
+separates barrels from septa (contrast >= 0.3) in at least one of the two images. Each chosen <run>/<ID>/results/ is copied to <out>/<ID>/results/ with source.json
 (chosen run, every candidate's contrast / matched barrels, reference contrast). Writes <out>/selection.csv and the
 run-level files (config.toml with work_dir = out, template.npz, barrel_index.csv, registration_params.csv).
 """
@@ -41,6 +44,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--ref", help="reference run for comparison only (e.g. Lana Smith's D2_neuropixels)")
     ap.add_argument("--hemisphere", type=int, default=1)
+    ap.add_argument("--score", default="contrast_after", choices=["contrast_after", "contrast_both"])
     a = ap.parse_args()
     runs = [tuple(v.split("=", 1)) for v in a.runs]
     prim = runs[0][1]
@@ -58,8 +62,13 @@ def main():
         if not cand:
             continue
         p0 = runs[0][0]
-        ok = {k: v["contrast_after"] >= FAIL for k, v in cand.items()}
-        if ok.get(p0):
+        if a.score == "contrast_both":
+            ok = {k: max(v.get("contrast_after_ch0", 0), v.get("contrast_after_ch1", 0)) >= FAIL for k, v in cand.items()}
+        else:
+            ok = {k: v["contrast_after"] >= FAIL for k, v in cand.items()}
+        if a.score == "contrast_both":
+            pick = max(cand, key=lambda k: cand[k].get("contrast_both", -1))
+        elif ok.get(p0):
             pick = p0
         elif any(ok.values()):
             pick = max((k for k in cand if ok[k]), key=lambda k: cand[k]["contrast_after"])
@@ -75,12 +84,17 @@ def main():
                     contrast_after=cand[pick]["contrast_after"], n_matched=cand[pick]["n_matched"],
                     l4_offset_um=cand[pick]["l4_offset_um"],
                     reference_contrast=mr["contrast_after"] if mr else None,
-                    reference_passed=bool(mr["contrast_after"] >= FAIL) if mr else None,
+                    reference_passed=bool(mr["contrast_after"] >= FAIL) if mr else None, score=a.score,
                     candidates={k: dict(contrast_after=round(v["contrast_after"], 3), n_matched=v["n_matched"],
-                                        l4_offset_um=v["l4_offset_um"]) for k, v in cand.items()})
+                                        l4_offset_um=v["l4_offset_um"],
+                                        **{c: round(v[c], 3) for c in ("contrast_both", "contrast_after_ch0",
+                                                                       "contrast_after_ch1") if c in v})
+                                for k, v in cand.items()},
+                    candidate_dirs={k: dict(runs)[k] for k in cand})
         json.dump(info, open(f"{dst}/source.json", "w"), indent=1, default=float)
-        rows.append({k: v for k, v in info.items() if k != "candidates"}
-                    | {f"contrast_{k}": v["contrast_after"] for k, v in cand.items()})
+        rows.append({k: v for k, v in info.items() if k not in ("candidates", "candidate_dirs")}
+                    | {f"contrast_{k}": v["contrast_after"] for k, v in cand.items()}
+                    | {f"both_{k}": v.get("contrast_both") for k, v in cand.items()})
         print(f"{b}: {pick} (contrast {cand[pick]['contrast_after']:.2f}{'' if ok[pick] else ', FAILED'})", flush=True)
     S = pd.DataFrame(rows)
     S.to_csv(f"{a.out}/selection.csv", index=False)

@@ -37,7 +37,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 
 from barrelreg.atlas import BARREL_NAMES, BFD_IDS, C2, ISO_IDS, S, SEPTA, collapse, row_of
-from barrelreg.config import Config
+from barrelreg.config import Config, results_dir
 from barrelreg.imageproc import bandpass
 from barrelreg.register import CONTRAST_RANGE, PATTERN_RANGE, PIX
 
@@ -337,6 +337,53 @@ def track_samples(P, depth, lo):
     return X, q
 
 
+# ----------------------------------------------------------------------------- variants
+def variant_grid(pdf, cfg, bid, hv):
+    """Final runs (build_final.py): every candidate fit of this hemisphere side by side, the chosen one framed."""
+    sf = f"{cfg.brain_dir(bid)}/source.json"
+    if not os.path.exists(sf):
+        return
+    src = json.load(open(sf))
+    dirs = src.get("candidate_dirs", {})
+    V = []
+    for lab, d in dirs.items():
+        f = f"{results_dir(d, bid)}/h{hv}/debug.npz"
+        if os.path.exists(f):
+            V.append((lab, np.load(f), src["candidates"].get(lab, {})))
+    if len(V) < 2:
+        return
+    D0 = V[0][1]
+    box = square_box((D0["cols"] > 0) | np.any([D["cols_new"] > 0 for _, D, _ in V], 0))
+    score = src.get("score", "contrast_after")
+    nc = min(len(V), 4)
+    nr = -(-len(V) // nc)
+    fig = page(pdf, "Every variant of the fit, chosen one framed",
+               f"Same hemisphere fitted with each combination of image channel, search and lesion mask (wide search, "
+               f"slab depth chosen per fit by barrel contrast). Dashed: brainreg barrels; solid: fitted barrels; black: "
+               f"masked pixels. Score = {score} (barrel-vs-septum contrast after the fit"
+               f"{', mean of ch0 and ch1 images' if score == 'contrast_both' else ''}); the variant with the highest "
+               f"score is chosen. With the lesion mask the contrast is measured on unmasked tissue only, so judge those "
+               f"fits by eye.", h=4.6 * nr + 0.6)
+    gs = fig.add_gridspec(nr, nc, left=0.02, right=0.98, top=fig.top_, bottom=0.02, wspace=0.05, hspace=0.12)
+    for i, (lab, D, c) in enumerate(V):
+        ax = fig.add_subplot(gs[i // nc, i % nc])
+        p = f"o{int(D['chosen_offset'])}_"
+        val = D[p + "valid"] & ~D[p + "art"]
+        chosen = lab == src["chosen_run"]
+        t = (f"{lab}{'  (CHOSEN)' if chosen else ''}\n{score} {c.get(score, float('nan')):.2f}, contrast "
+             f"{c.get('contrast_after', float('nan')):.2f}, {c.get('n_matched', '-')} matched, slab "
+             f"{c.get('l4_offset_um', 0):+d} um")
+        flat_panel(ax, flatten(D[p + "l4"], D[p + "valid"]), val, box, cols=D["cols_new"], cols_ghost=D["cols"],
+                   fs=5, bar=i == 0, title=t)
+        ax.title.set_color("#1a7f37" if chosen else "0.2")
+        if chosen:
+            for sp in ax.spines.values():
+                sp.set_visible(True)
+                sp.set_color("#1a7f37")
+                sp.set_linewidth(3)
+    done(pdf, fig)
+
+
 # ----------------------------------------------------------------------------- report
 def report(cfg, bid, hv, tracks, out_pdf):
     od = f"{cfg.brain_dir(bid)}/h{hv}"
@@ -424,6 +471,9 @@ def report(cfg, bid, hv, tracks, out_pdf):
             txt += ["  none found in this hemisphere"]
         ax.text(0, 1, "\n".join(txt), fontsize=10, va="top")
         done(pdf, fig)
+
+        # ---------------------------------------------------------------- 0b every variant (final runs)
+        variant_grid(pdf, cfg, bid, hv)
 
         # ---------------------------------------------------------------- 1 inputs
         fig = page(pdf, "Inputs: autofluorescence (ch0) and the coarse whole-brain registration",

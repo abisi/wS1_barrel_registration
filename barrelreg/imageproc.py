@@ -66,6 +66,26 @@ def artefact_mask(img, valid, region, z=4.5, grow=3):
     return ndimage.binary_dilation(m, iterations=grow)
 
 
+def lesion_mask(img, valid, region, sigma=4, z=2.5, min_px=400, grow=8):
+    """Large lesions (probe / injection damage, holes with bright rims) in a flat image: the background-flattened
+    image smoothed at ~40 um, |robust z| > z within the region, components of >= min_px (~2 barrels) kept, dilated by
+    grow px to take the rim. artefact_mask only catches their cores; the rims then dominate the band-pass and search."""
+    w = valid.astype(np.float32)
+    x = np.where(valid, np.nan_to_num(img), 0).astype(np.float32)
+    bg = ndimage.gaussian_filter(x, 30) / np.maximum(ndimage.gaussian_filter(w, 30), 1e-3)
+    s = ndimage.gaussian_filter(x, sigma) / np.maximum(ndimage.gaussian_filter(w, sigma), 1e-3) / np.maximum(bg, 1e-6)
+    v = s[region & valid]
+    med = np.median(v)
+    zz = (s - med) / (1.4826 * np.median(np.abs(v - med)) + 1e-9)
+    m = ndimage.binary_opening((np.abs(zz) > z) & valid, iterations=2)
+    lab, n = ndimage.label(m)
+    if n:
+        area = np.bincount(lab.ravel())
+        area[0] = 0
+        m = (area >= min_px)[lab]
+    return ndimage.binary_dilation(m, iterations=grow)
+
+
 def l4_bandpass(l4, valid, field):
     x = l4.copy()
     x = np.minimum(x, np.percentile(x[valid & field], 97))  # bright puncta (cells, vessels)

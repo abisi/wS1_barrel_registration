@@ -40,18 +40,27 @@ from scipy import ndimage
 from . import pointset as ps
 from .atlas import BARREL_NAMES, BFD_IDS, C2, ISO_IDS, L4_BFD_IDS, SEPTA, collapse
 from .flatmap import Flat, flat_frame, hull_columns, laplace_depth, trace_to_level
-from .imageproc import artefact_mask, bandpass, contrast, l4_bandpass, segment, tissue_mask_padded
+from .imageproc import artefact_mask, bandpass, contrast, l4_bandpass, lesion_mask, segment, tissue_mask_padded
 from .l4bottom import barrel_bottom
 from .plotting import coronal_figure, flat_fit_figure
+from .refine import refine as contrast_refine
 from .search import BP, brute_force, masked_corr, similarity_points, synth, znorm
 
 PIX = 10.0  # flat pixel and working voxel, um
-OFFSETS_UM = list(range(-300, 75, 25))  # slab centre relative to the image L4 bottom (negative = above it)
+# slab centre relative to the image L4 bottom (negative = above it); BARRELREG_OFFSETS_RANGE=lo,hi widens it
+_orng = [int(v) for v in os.environ.get("BARRELREG_OFFSETS_RANGE", "-300,50").split(",")]
+OFFSETS_UM = list(range(_orng[0], _orng[1] + 25, 25))
 # rescue runs: BARRELREG_CH = image channel (default 0); BARRELREG_FIT_OFFSETS = comma list of L4 offsets (um) fitted
 # instead of the contrast / pattern picks (the fit with most matched barrels wins, as for the two picks)
 IMG_CH = int(os.environ.get("BARRELREG_CH", "0"))
 PICK = os.environ.get("BARRELREG_PICK", "matches")  # how to choose among fitted slab depths: matches | contrast
 FIT_OFFSETS = [int(v) for v in os.environ.get("BARRELREG_FIT_OFFSETS", "").split(",") if v.strip()]
+# BARRELREG_LESION=1: mask large lesions with their rims (imageproc.lesion_mask) in the fitted slabs, so the search and
+# the matching use only the barrels around them
+LESION = os.environ.get("BARRELREG_LESION", "") == "1"
+# BARRELREG_CONTRAST_REFINE=1: after the matched fit, re-rank the search placements by barrel contrast and move the
+# atlas barrel landmarks to maximise it (barrelreg/refine.py); kept when it beats the matched fit by > 0.02
+CREFINE = os.environ.get("BARRELREG_CONTRAST_REFINE", "") == "1"
 # Offsets searched for the best band-pass contrast and for the best match to the barrel pattern. Over 36 AB/MH
 # hemispheres the contrast peaked at -25 / -50 um in 33; the 2 peaks at -200 / -250 um were L2/3 texture (AB082 left
 # then fitted a slab at 300 um depth, contrast after 0.98 -> 0.35). The pattern peaked at -25 to -100 um in 30 of 36.
@@ -66,7 +75,10 @@ if os.environ.get("BARRELREG_SEARCH", "") == "wide":
     # candidates, each polished on a fine local grid (scale +-0.05, rotation +-3 deg, shift +-50 um)
     MAX_T, SCALES = 800, tuple(np.round(np.arange(0.6, 1.5 + 1e-6, 0.1), 2))
     MAX_R, STEP_R, STEP_T, TOPK, REFINE = 30, 3.0, 50, 8, True
-NEAR_UM = 1000  # flat coordinates are computed this far around the registered SSp-bfd
+# flat coordinates are computed this far around the registered SSp-bfd, inside a crop with this margin; both larger
+# with BARRELREG_NEAR_UM / BARRELREG_MARGIN_UM when the global registration is off (barrels near the edge of the slab)
+NEAR_UM = int(os.environ.get("BARRELREG_NEAR_UM", "1000"))
+MARGIN_UM = int(os.environ.get("BARRELREG_MARGIN_UM", "700"))
 CCF_NX = 1140  # CCF 10 um, axis 2 (mirror: x -> CCF_NX - 1 - x)
 WORK_UM = 20.0  # grid of the Laplace / streamline step
 SURF_CLOSE_UM = 400  # surface damage narrower than ~2x this is bridged when measuring depth below the pia
@@ -74,6 +86,35 @@ SURF_OPEN_UM = 75  # structures thinner than ~2x this (detached membranes) are n
 # BARRELREG_DEBUG=1: every intermediate step of a hemisphere is saved to h<hv>/debug.npz (2D) and debug3d.npz (crop
 # volumes), for scripts/brain_report.py. Off by default; the fit itself is unchanged.
 DEBUG = os.environ.get("BARRELREG_DEBUG", "") == "1"
+# BARRELREG_SEEDS=<json>: {brain: {"points_flat_rc": {barrel name: [row, col]}}} (template flat grid, 10 um px; from the
+# seed page). For a seeded brain the search is replaced by one placement: the similarity transform (least squares,
+# scale + rotation + shift) taking the atlas centroids of the seeded barrels onto the clicked points. Point matching,
+# TPS and the depth choice then run as usual; the contrast refinement is skipped (it can jump back to a wrong placement).
+# BARRELREG_SHARPEN=<amount>[,<sigma_um>]: unsharp mask on both image channels before everything else
+# (I + amount * (I - Gaussian(I, sigma))), for blurred brains (MH015). Default sigma 60 um.
+_sh = [float(v) for v in os.environ.get("BARRELREG_SHARPEN", "").split(",") if v.strip()]
+SHARPEN = (_sh[0], _sh[1] if len(_sh) > 1 else 60.0) if _sh else None
+SEEDS = json.load(open(os.environ["BARRELREG_SEEDS"])) if os.environ.get("BARRELREG_SEEDS") else {}
+
+
+def seed_placement(Ac, ksA, pts, centre):
+    """Similarity (Umeyama, no reflection) atlas centroids of the seeded barrels -> clicked points, in the
+    brute_force parametrisation: (scale, rotation deg, dy um, dx um) about `centre`. Also the residual per seed (um)."""
+    idx = {int(k): i for i, k in enumerate(ksA)}
+    names = [n for n in pts if n in BARREL_NAMES and BARREL_NAMES.index(n) + 1 in idx]
+    if len(names) < 3:
+        raise RuntimeError(f"need >= 3 seeds on atlas barrels, got {names}")
+    X = np.array([Ac[idx[BARREL_NAMES.index(n) + 1]] for n in names]) - centre
+    Y = np.array([pts[n] for n in names], float) - centre
+    mx, my = X.mean(0), Y.mean(0)
+    Xc, Yc = X - mx, Y - my
+    U, S_, Vt = np.linalg.svd(Yc.T @ Xc)
+    D = np.diag([1.0, np.sign(np.linalg.det(U @ Vt))])
+    R = U @ D @ Vt
+    sc = float(np.trace(np.diag(S_) @ D) / (Xc ** 2).sum())
+    d = my - sc * R @ mx
+    res = np.linalg.norm(X @ (sc * R).T + d - Y, axis=1) * PIX
+    return sc, float(np.degrees(np.arctan2(R[1, 0], R[0, 0]))), float(d[0] * PIX), float(d[1] * PIX), names, res
 DBG = {}
 
 
@@ -121,7 +162,7 @@ def block_mean(x, UP):
 
 
 # ----------------------------------------------------------------------------- geometry
-def crop20(reg, hv, vox, dn, margin_um=700):
+def crop20(reg, hv, vox, dn, margin_um=None):
     """Box around the largest registered SSp-bfd component of hemisphere hv (sample voxels of size vox); the box
     lengths are multiples of dn so it splits into 20 um blocks."""
     atl = tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")
@@ -131,7 +172,7 @@ def crop20(reg, hv, vox, dn, margin_um=700):
     sz = np.bincount(lab.ravel())
     sz[0] = 0
     pts = np.argwhere(lab == sz.argmax()) * 4
-    margin = int(round(margin_um / vox))
+    margin = int(round((MARGIN_UM if margin_um is None else margin_um) / vox))
     shape = np.array(atl.shape)
     lo = np.maximum(pts.min(0) - margin, 0)
     hi = np.minimum(pts.max(0) + 4 + margin, shape)
@@ -179,6 +220,11 @@ def prep(cfg, bid, hv):
     A = np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")[sl]).astype(np.int64)
     H = np.asarray(tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")[sl])
     I = np.asarray(tifffile.memmap(cfg.ds_file(reg, IMG_CH), mode="r")[sl]).astype(np.float32)
+    # the other channel, to score every fit on both images (ch0 and ch1 fits are then compared on the same footing)
+    I2 = np.asarray(tifffile.memmap(cfg.ds_file(reg, 1 - IMG_CH), mode="r")[sl]).astype(np.float32)
+    if SHARPEN:
+        amt, sig = SHARPEN
+        I, I2 = (np.maximum(x + amt * (x - ndimage.gaussian_filter(x, sig / VOX)), 0) for x in (I, I2))
     A20, H20 = A[::DN, ::DN, ::DN], H[::DN, ::DN, ::DN]
     # deformation-field check: field (mm) -> registration-atlas voxel -> annotation == registered atlas
     ann = cfg.registration_atlas()
@@ -213,9 +259,9 @@ def prep(cfg, bid, hv):
         stream_end=P[::25], stream_bad=bad[::25], v_A20=A20.astype(np.int32), v_u20=u, v_l4_20=l4_20, v_F20=F20)
     # 10 um working grid
     if DN == 1:
-        atl, ch0, hem = up(A20, 0, UP), up(I, 1, UP), up(H20, 0, UP)
+        atl, ch0, hem, ch_other = up(A20, 0, UP), up(I, 1, UP), up(H20, 0, UP), up(I2, 1, UP)
     else:
-        atl, ch0, hem = A, I, H
+        atl, ch0, hem, ch_other = A, I, H, I2
     hemi = hem == hv
     Fu = np.stack([up(F20f[..., k], 1, UP) for k in range(2)], -1)
     Fu[~(up(have, 0, UP) & up(near20, 0, UP))] = np.nan
@@ -227,7 +273,7 @@ def prep(cfg, bid, hv):
     bridged = float(np.mean(depth[l4band] - depth_raw[l4band] > 30)) if l4band.any() else 0.0
     dbg(v_atl=atl.astype(np.int32), v_ch0=ch0, v_depth=depth, v_depth_raw=depth_raw, v_tissue=tissue, v_F=Fu,
         v_hemi=hemi, v_dreg=dreg, surface_bridged_frac=bridged)
-    return dict(sl=sl, atl=atl, ch0=ch0, hemi=hemi, F=Fu, tissue=tissue, depth=depth, dreg=dreg, near=up(near20, 0, UP),
+    return dict(sl=sl, atl=atl, ch0=ch0, ch_other=ch_other, hemi=hemi, F=Fu, tissue=tissue, depth=depth, dreg=dreg, near=up(near20, 0, UP),
                 surface_bridged_frac=bridged,
                 ctx=np.isin(atl, ISO_IDS) & hemi,
                 field_check=chk, u0=u0, laplace_info=int(info), n_nonconv=int(bad.sum()))
@@ -318,19 +364,31 @@ def run_hemi(cfg, bid, hv, od):
     gy, gx = np.mgrid[0:U, 0:V]
     grid = np.c_[gy.ravel(), gx.ravel()].astype(float)
 
+    seed = None
+    if bid in SEEDS:
+        seed = seed_placement(Ac, ksA, SEEDS[bid].get("points_flat_rc", SEEDS[bid]), centre)
+        print(f"  h{hv} SEEDED placement from {seed[4]}: scale {seed[0]:.3f}, rot {seed[1]:.1f} deg, shift "
+              f"{seed[2]:.0f},{seed[3]:.0f} um; seed residuals {np.round(seed[5]).astype(int).tolist()} um", flush=True)
+
     def fit_at(d4):
         ks = [d for d in OFFSETS_UM if abs(d - d4) <= 25]
         l4 = np.mean([stack[d][0] for d in ks], 0)
         valid = np.all([stack[d][1] for d in ks], 0)
         art = artefact_mask(l4, valid, foot15)
+        if LESION:
+            art |= lesion_mask(l4, valid, foot15)
         l4f = np.where(art, np.median(l4[valid & ~art]), l4)
         v2 = valid & ~art
         bpA = l4_bandpass(l4f, valid, fieldd)
         mask = foot15 & v2
         fix = znorm(bandpass(l4f, valid, *BP), mask)
         fix[~v2] = 0
-        tops = brute_force(fix[::2, ::2], mov[::2, ::2], mask[::2, ::2], PIX * 2, centre / 2, max_t=MAX_T, scales=SCALES,
-                           max_r=MAX_R, step_r=STEP_R, step_t=STEP_T, topk=TOPK, refine=REFINE)
+        if seed is not None:
+            tops = [(np.nan,) + seed[:4]]
+            brute_force.last_all = np.array([[np.nan, *seed[:4]]])
+        else:
+            tops = brute_force(fix[::2, ::2], mov[::2, ::2], mask[::2, ::2], PIX * 2, centre / 2, max_t=MAX_T,
+                               scales=SCALES, max_r=MAX_R, step_r=STEP_R, step_t=STEP_T, topk=TOPK, refine=REFINE)
         # segment around the atlas field placed by the best search candidate (the identity can be ~600 um off)
         c0, sc, ang, dy, dx = tops[0]
         th = np.deg2rad(ang)
@@ -346,8 +404,12 @@ def run_hemi(cfg, bid, hv, od):
         cands = []
         for j, (c0, sc, ang, dy, dx) in enumerate(tops):
             T_sim = similarity_points(Ac, sc, ang, np.array([dy, dx]) / PIX, centre)
-            T_aff, *_ = ps.cpd_affine(Bc, T_sim, w=0.3, s2=16.0)
-            T_nr, _ = ps.cpd_nonrigid(Bc, T_aff, beta=25.0, lam=3.0, w=0.3, s2=9.0)
+            try:
+                T_aff, *_ = ps.cpd_affine(Bc, T_sim, w=0.3, s2=16.0)
+                T_nr, _ = ps.cpd_nonrigid(Bc, T_aff, beta=25.0, lam=3.0, w=0.3, s2=9.0)
+            except np.linalg.LinAlgError:  # degenerate point set (few blobs at an extreme slab depth): skip candidate
+                print(f"   candidate {j}: point matching degenerate, skipped", flush=True)
+                continue
             ia, ib = ps.hungarian(T_nr, Bc, ps.GATE_PX, areaA, areaB)
             dbg(f"{p}c{j}_", T_sim=T_sim, T_aff=T_aff, T_nr=T_nr, ia_h=ia, ib_h=ib)
             if len(ia) < 6:
@@ -389,7 +451,8 @@ def run_hemi(cfg, bid, hv, od):
         dbg(p, fit_contrast=con_fit)
         return dict(d4=d4, contrast=con_fit, l4=l4, valid=valid, art=art, v2=v2, bpA=bpA, blobs=blobs, Bc=Bc, best=best,
                     n_agree=1 + len(same), n_cands=len(cands), margin=best["corr"] - max(other) if other else np.nan,
-                    search_top=[round(t[0], 3) for t in tops], cand_corr=[round(c["corr"], 3) for c in cands])
+                    search_top=[round(t[0], 3) for t in tops], cand_corr=[round(c["corr"], 3) for c in cands],
+                    search_all=brute_force.last_all)
 
     d_con, d_pat = max(con, key=con.get), max(pat, key=pat.get)
     fits = []
@@ -397,9 +460,9 @@ def run_hemi(cfg, bid, hv, od):
     for d in fit_offsets:
         try:
             fits.append(fit_at(d))
-        except RuntimeError as e:
+        except (RuntimeError, np.linalg.LinAlgError) as e:
             print(f"  h{hv}: {e}", flush=True)
-    dbg(fit_offsets=fit_offsets, img_ch=IMG_CH,
+    dbg(fit_offsets=fit_offsets, img_ch=IMG_CH, lesion=int(LESION), near_um=NEAR_UM, margin_um=MARGIN_UM,
         search_params=[MAX_T, STEP_T, MAX_R, STEP_R, min(SCALES), max(SCALES), TOPK, int(REFINE)])
     if not fits:
         raise RuntimeError("no L4 offset gave a fit")
@@ -425,6 +488,28 @@ def run_hemi(cfg, bid, hv, od):
     disp_far = ps.tps_fit(Bc[ib], Ac[ia], 1e6)(grid).T.reshape(2, U, V)  # ~affine outside the field
     dbg(disp_tps=disp, disp_far=disp_far, wt=wt, placed=placed)
     disp = wt[None] * disp + (1 - wt[None]) * disp_far
+    # optional: segmentation-free refinement by barrel contrast (kept only when it beats the matched fit)
+    refined, c_matched, c_refined, ref_place = False, np.nan, np.nan, None
+    if CREFINE and seed is None:
+        def warp_cols(d):
+            a = ndimage.map_coordinates(alab, [gy + d[0], gx + d[1]], order=0, cval=0)
+            return np.where(a < SEPTA, a, 0)
+        cm = warp_cols(disp)
+        c_matched = ps.sep_contrast(bpA, cm, v2 & ndimage.binary_dilation(cm > 0, iterations=5))
+        Y, c_refined, ref_place = contrast_refine(alab, cols, Ac, bpA, v2, s_best, centre, W["search_all"], PIX,
+                                                  log=lambda t: print(t, flush=True))
+        if Y is not None and c_refined > c_matched + 0.02:
+            dr = ps.tps_fit(Y, Ac, s_best)(grid).T.reshape(2, U, V)
+            pl = ndimage.map_coordinates(foot.astype(np.uint8), [gy + dr[0], gx + dr[1]], order=0, cval=0) > 0
+            dist = ndimage.distance_transform_edt(~ndimage.binary_dilation(foot | pl, iterations=5))
+            wt = np.where(dist >= ps.TAPER_PX, 0.0,
+                          0.5 * (1 + np.cos(np.pi * np.minimum(dist, ps.TAPER_PX) / ps.TAPER_PX)))
+            dfar = ps.tps_fit(Y, Ac, 1e6)(grid).T.reshape(2, U, V)
+            disp = wt[None] * dr + (1 - wt[None]) * dfar
+            placed, refined = pl, True
+            dbg(refine_Y=Y)
+        print(f"  h{hv} contrast refinement: matched fit {c_matched:.3f}, refined {c_refined:.3f} -> "
+              f"{'refined fit kept' if refined else 'matched fit kept'}", flush=True)
     jac = ps.jacobian_2d(disp)
     alab_new = ndimage.map_coordinates(alab, [gy + disp[0], gx + disp[1]], order=0, cval=0)
     cols_new = np.where(alab_new < SEPTA, alab_new, 0)
@@ -487,10 +572,21 @@ def run_hemi(cfg, bid, hv, od):
     # metrics: initial placement (identity: Perens SSp-bfd centroid on the CCF one) vs corrected
     fv = v2 & ndimage.binary_dilation((cols > 0) | (cols_new > 0), iterations=5)
     names_blob = {int(ib[n]) + 1: int(ksA[ia[n]]) for n in range(len(ia))}
+    # the same fit scored on the other channel's slab (same depths, same masked pixels)
+    ks = [d for d in OFFSETS_UM if abs(d - d_off) <= 25]
+    sl2 = [flat.mean(G[good & (np.abs(rel - d) <= 30)], P["ch_other"][good & (np.abs(rel - d) <= 30)]) for d in ks]
+    l4o, valid_o = np.mean([x[0] for x in sl2], 0), np.all([x[1] for x in sl2], 0)
+    v2o = valid_o & ~art
+    bpo = l4_bandpass(np.where(v2o, l4o, np.median(l4o[v2o])), valid_o, fieldd)
+    fvo = v2o & ndimage.binary_dilation((cols > 0) | (cols_new > 0), iterations=5)
+    con_ch = {IMG_CH: ps.sep_contrast(bpA, cols_new, fv), 1 - IMG_CH: ps.sep_contrast(bpo, cols_new, fvo)}
+    dbg(other_l4=l4o, other_bp=bpo)
     d_b, _, n_b = ps.overlap_metrics(cols, blobs, names_blob)
     d_a, _, n_a = ps.overlap_metrics(cols_new, blobs, names_blob)
     sc_ = best["search"]
     met = dict(brain=bid, hemisphere=hv, registration=os.path.basename(cfg.reg_dir(bid)), field_check=P["field_check"],
+               sharpen=SHARPEN, seeded=seed is not None, seed_barrels=None if seed is None else seed[4],
+               seed_residual_um=None if seed is None else float(np.mean(seed[5])),
                laplace_info=P["laplace_info"], u0=P["u0"], streamlines_not_converged=P["n_nonconv"],
                filled_frac=filled_frac, surface_bridged_frac=P["surface_bridged_frac"],
                l4_depth_um=float(np.median(bot[foot]) + d_off), atlas_l4_depth_um=atl_l4_depth,
@@ -503,7 +599,7 @@ def run_hemi(cfg, bid, hv, od):
                wm_registered_thickness_um=float(np.median(bw_thick[foot])),
                n_blobs=len(Bc), n_atlas=len(Ac), n_matched=len(ia), search_top=W["search_top"], cand_corr=W["cand_corr"],
                search_best=dict(corr=sc_[0], scale=sc_[1], rot_deg=sc_[2], shift_um=[sc_[3], sc_[4]]),
-               offset_candidates_um=sorted({d_con, d_pat}), depth_fits=depth_fits, depth_pick=PICK,
+               offset_candidates_um=sorted({d_con, d_pat}), depth_fits=depth_fits, depth_pick=PICK, lesion_mask=LESION, near_um=NEAR_UM, margin_um=MARGIN_UM,
                n_candidates_agree=n_agree, margin_to_other_naming=margin,
                tps_smoothing=s_best, affine_residual_um=best["affres"],
                depth_contrast={str(k): round(v, 3) for k, v in con.items()},
@@ -511,6 +607,10 @@ def run_hemi(cfg, bid, hv, od):
                naming_ambiguous=bool(np.isfinite(margin) and margin < TIE_CORR),
                err_initial_um=float(np.median(e_before)), err_tps_loo_um=float(np.median(e_loo)),
                contrast_initial=ps.sep_contrast(bpA, cols, fv), contrast_after=ps.sep_contrast(bpA, cols_new, fv),
+               image_channel=IMG_CH, contrast_after_ch0=con_ch[0], contrast_after_ch1=con_ch[1],
+               contrast_both=float(np.mean([con_ch[0], con_ch[1]])),
+               contrast_refine=CREFINE, refined=refined, contrast_matched_fit=c_matched,
+               contrast_refined_fit=c_refined, refine_placement=ref_place,
                dice_initial=d_b, dice_after=d_a, naming_initial=n_b, naming_after=n_a,
                jac_min=float(jac[foot | placed].min()),
                disp_median_um=float(np.median(np.hypot(*disp[:, cols > 0])) * PIX),

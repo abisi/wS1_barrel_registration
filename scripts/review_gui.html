@@ -1,0 +1,598 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Barrel Fit Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* One page per brain: Compare (fits on one canvas, flicker A/B, probe barrel per fit, decide) and Seed (guided clicking
+   with a live similarity fit through the seeds). Built by scripts/review_gui.py; data in brains/<ID>.json. */
+:root {
+  --bg: #f3f4f2; --panel: #ffffff; --ink: #1c211f; --muted: #5f6964; --line: #d9ddd9;
+  --accent: #0f7b6c; --accent-soft: #d8efea; --good: #1a7f37; --bad: #b42318; --warn: #9a6700;
+  --pick: #6d3fc0; --pick-soft: #ece4fa; --redo: #7c3aed;
+  --f-ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141816; --panel: #1c211f; --ink: #e6ebe8; --muted: #9aa5a0; --line: #2e3532;
+  --accent: #4cc2ad; --accent-soft: #19372f; --good: #4ac26b; --bad: #ff7b72; --warn: #d29922;
+  --pick: #b392f0; --pick-soft: #2c2340; --redo: #a78bfa; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #141816; --panel: #1c211f; --ink: #e6ebe8; --muted: #9aa5a0; --line: #2e3532;
+  --accent: #4cc2ad; --accent-soft: #19372f; --good: #4ac26b; --bad: #ff7b72; --warn: #d29922;
+  --pick: #b392f0; --pick-soft: #2c2340; --redo: #a78bfa; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); font-size: 14px; line-height: 1.45 }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel) }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line) }
+header .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding-block: 9px }
+h1 { font-size: 16px; font-weight: 700; margin: 0 }
+.prog { font: 12.5px var(--f-mono); color: var(--muted) } .prog b { color: var(--ink); font-weight: 500 }
+.bar { width: 110px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden } .bar i { display: block; height: 100%; background: var(--pick); width: 0 }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto }
+.chip { font: 500 12.5px var(--f-ui); border: 1px solid var(--line); background: transparent; color: var(--ink); padding: 3px 10px; border-radius: 999px; cursor: pointer }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink) }
+.chip .n { font-family: var(--f-mono); opacity: .7; margin-left: 4px }
+button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+main.wrap { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 16px; padding-block: 14px 40px }
+nav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); align-self: start; max-height: calc(100vh - 84px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px }
+.brain { display: grid; grid-template-columns: 1fr auto; gap: 4px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 6px 10px; color: var(--ink); font: 500 12.5px var(--f-mono); cursor: pointer }
+.brain[aria-current="true"] { background: var(--accent-soft) }
+.tag { font: 600 10.5px var(--f-ui); padding: 0 6px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap }
+.tag.local { color: var(--good) } .tag.global { color: var(--muted) } .tag.redo { color: var(--redo) } .tag.new { color: var(--warn) } .tag.fit { color: var(--accent) }
+select#brainSel { display: none; width: 100%; font: 500 14px var(--f-mono); padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); margin-bottom: 10px }
+.head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px }
+.head h2 { font: 600 22px var(--f-mono); margin: 0 }
+.tabs { display: flex; gap: 0; margin-left: auto; border: 1px solid var(--line); border-radius: 7px; overflow: hidden }
+.tabs button { font: 600 13px var(--f-ui); border: 0; background: var(--panel); color: var(--ink); padding: 6px 14px; cursor: pointer }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--panel) }
+.tabs button:disabled { color: var(--muted); cursor: default }
+.probe { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 7px 11px; margin-bottom: 12px; font-size: 13px }
+.probe.differ { border-left-color: var(--warn) } .probe.none { border-left-color: var(--line); color: var(--muted) }
+.cols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 14px; align-items: start }
+.viewer { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px) }
+.cv { position: relative; width: min(100%, max(320px, calc(100vh - 300px))); margin: 0 auto; aspect-ratio: 1; background: #000; border-radius: 5px; overflow: hidden; touch-action: none }
+.cv canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab }
+.cv.seed canvas { cursor: crosshair }
+.cv .badge { position: absolute; left: 8px; top: 8px; font: 600 12.5px var(--f-mono); color: #fff; background: rgba(0,0,0,.6); padding: 2px 8px; border-radius: 4px; pointer-events: none }
+.vbar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 8px; font-size: 12.5px }
+.vbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex-wrap: wrap }
+.seg button { font: 500 12px var(--f-mono); border: 0; border-right: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 3px 8px; cursor: pointer }
+.seg button:last-child { border-right: 0 }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff }
+.sbtn { font: 600 12.5px var(--f-ui); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer }
+.sbtn:disabled { opacity: .45; cursor: default }
+.sbtn.primary { border-color: var(--pick); background: var(--pick); color: #fff }
+.sbtn.warn { border-color: var(--redo); color: var(--redo) }
+.box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px }
+.box h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums }
+th { font: 600 10.5px var(--f-ui); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); text-align: right; padding: 3px 5px; border-bottom: 1px solid var(--line); cursor: help }
+th:first-child, th:nth-child(2) { text-align: left }
+td { padding: 5px; border-bottom: 1px solid var(--line); font: 12.5px var(--f-mono); text-align: right; vertical-align: middle }
+td.l { text-align: left; font-family: var(--f-ui) }
+tr.isA td { background: color-mix(in srgb, #06b6d4 12%, transparent) }
+tr.isB td { background: color-mix(in srgb, #f59e0b 12%, transparent) }
+tr.mine td:nth-child(2) { box-shadow: inset 3px 0 0 var(--pick) }
+td .best { font-weight: 600; color: var(--good) }
+td .k { font: 500 11px var(--f-mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px }
+.kind { font: 600 10.5px var(--f-ui); color: var(--redo); margin-left: 4px }
+.ab { display: inline-flex; gap: 3px }
+.ab button { font: 600 11px var(--f-mono); width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; padding: 0 }
+.ab button.a[aria-pressed="true"] { background: #06b6d4; border-color: #06b6d4; color: #000 }
+.ab button.b[aria-pressed="true"] { background: #f59e0b; border-color: #f59e0b; color: #000 }
+.decide { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px }
+.decide button { font: 600 13px var(--f-ui); padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer }
+.decide button[aria-pressed="true"].d-local { background: var(--pick); border-color: var(--pick); color: #fff }
+.decide button[aria-pressed="true"].d-global { background: var(--muted); border-color: var(--muted); color: var(--panel) }
+.decide button[aria-pressed="true"].d-redo { background: var(--redo); border-color: var(--redo); color: #fff }
+.decide button:disabled { opacity: .45; cursor: default }
+textarea { width: 100%; min-height: 40px; resize: vertical; font: 13px var(--f-ui); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px }
+.oldnote { font-size: 12.5px; color: var(--muted); margin: 4px 0 6px; display: flex; gap: 8px; align-items: baseline }
+.oldnote s { color: var(--muted) }
+.msg { font-size: 12.5px; color: var(--muted); min-height: 18px; margin-top: 4px } .msg.err { color: var(--bad) }
+.help { font-size: 12px; color: var(--muted); margin: 6px 0 0 } .help kbd { font: 11px var(--f-mono); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px }
+.target { font: 600 20px var(--f-mono); color: var(--accent) }
+.seeds li { display: grid; grid-template-columns: 62px 1fr auto; gap: 6px; align-items: baseline; font: 12.5px var(--f-mono); padding: 2px 0; border-bottom: 1px dashed var(--line) }
+.seeds ul { list-style: none; margin: 0; padding: 0 }
+.seeds .ok { color: var(--good) } .seeds .mid { color: var(--warn) } .seeds .bad { color: var(--bad); font-weight: 600 }
+.seeds button { font-size: 11px; border: 0; background: none; color: var(--muted); cursor: pointer }
+.fitsum { font: 12.5px var(--f-mono); margin-top: 8px }
+.chips { display: flex; flex-wrap: wrap; gap: 3px }
+.chips button { font: 500 11.5px var(--f-mono); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer }
+.chips button.placed { background: var(--accent-soft) }
+.chips button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) }
+details.info summary { cursor: pointer; font-weight: 600; font-size: 13px }
+details.info dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 12.5px; margin: 8px 0 0 }
+details.info dt { font-weight: 600 } details.info dd { margin: 0 }
+@media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) } .viewer { position: static } }
+@media (max-width: 760px) { main.wrap { grid-template-columns: minmax(0, 1fr) } nav { display: none } select#brainSel { display: block } .filters { margin-left: 0 } }
+</style>
+
+<header><div class="wrap">
+  <h1>Barrel fit review</h1>
+  <span class="prog"><b id="nDone">0</b> / <span id="nAll">0</span> decided</span>
+  <span class="bar" aria-hidden="true"><i id="barFill"></i></span>
+  <div class="filters" role="group" aria-label="Filter brains" id="filters"></div>
+</div></header>
+
+<main class="wrap">
+  <nav id="list" aria-label="Brains"></nav>
+  <section style="min-width:0">
+    <label for="brainSel" hidden>Brain</label><select id="brainSel"></select>
+    <div id="view"><p class="help">Loading…</p></div>
+  </section>
+</main>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const COL = { A: "#06b6d4", B: "#f59e0b", G: "rgba(255,255,255,.75)", P: "#22c55e", wS1: "#ef4444", trk: "#cbd5e1" };
+const GUIDE = ["Alpha", "Beta", "Gamma", "Delta", "A1", "B1", "C1", "D1", "E1", "C2", "D2", "E2", "C3", "E3"];
+const FILTERS = [["todo", "To decide"], ["ws1", "wS1 probe"], ["seed", "Seeding"], ["all", "All"]];
+let M = null, db = null, canWrite = true;
+const DB = { picks: {}, seeds: {}, requests: {}, status: {} };
+const DET = {}, IMG = {};
+const S = { b: null, tab: "compare", filter: "todo", A: null, B: null, bg: "fit", mode: "overlay", flick: false, showB: false,
+  names: true, glob: false, hold: false, sm: "band", sch: 0, ssh: 0, sslab: "auto", target: null, skipped: {}, pts: {}, seedNote: {}, dirty: {} };
+
+/* ------------------------------------------------------------------ helpers */
+const det = () => DET[S.b];
+const meta = (b = S.b) => M.brains.find((x) => x.brain === b);
+const img = (src) => IMG[src] || (IMG[src] = Object.assign(new Image(), { src }));
+function decisionOf(p) {
+  if (!p || !p.variant) return null;
+  if (p.decision) return p.decision;
+  if (p.variant !== "none") return "use_local";
+  return /redo|redone|sharpen/i.test(p.note || "") ? "redo" : "use_global";
+}
+function newestRefit(m) { return Math.max(0, ...m.variants.filter((v) => v.kind !== "auto").map((v) => v.made)); }
+function isNew(m) { const p = DB.picks[m.brain]; return !!p && newestRefit(m) > Date.parse(p.at) / 1000; }
+function fitState(b) {
+  const st = DB.status[b], rq = DB.requests[b];
+  if (st && (!rq || Date.parse(st.at) >= Date.parse(rq.at))) return st.state === "fitting" ? "fitting" : null;
+  return rq ? "requested" : null;
+}
+function todo(m) { return !decisionOf(DB.picks[m.brain]) || isNew(m); }
+function shown() {
+  return M.brains.filter((m) => S.filter === "all" ? true : S.filter === "ws1" ? m.wS1 : S.filter === "seed" ? m.seed : todo(m));
+}
+function setMsg(t, err) { const e = $("#msg"); if (e) { e.textContent = t; e.className = "msg" + (err ? " err" : ""); } }
+
+/* ------------------------------------------------------------------ brain list */
+function renderList() {
+  $("#filters").innerHTML = FILTERS.map(([k, t]) => {
+    const n = M.brains.filter((m) => k === "all" ? true : k === "ws1" ? m.wS1 : k === "seed" ? m.seed : todo(m)).length;
+    return `<button class="chip" data-f="${k}" aria-pressed="${S.filter === k}">${t}<span class="n">${n}</span></button>`;
+  }).join("");
+  $("#filters").querySelectorAll(".chip").forEach((c) => c.onclick = () => { S.filter = c.dataset.f; const v = shown(); if (v.length && !v.includes(meta())) select(v[0].brain); else render(); });
+  const vis = shown();
+  $("#list").innerHTML = vis.length ? "" : `<p class="help" style="padding:10px">Nothing here.</p>`;
+  $("#brainSel").innerHTML = "";
+  vis.forEach((m) => {
+    const d = decisionOf(DB.picks[m.brain]), st = fitState(m.brain);
+    const tags = [d === "use_local" ? `<span class="tag local">local</span>` : d === "use_global" ? `<span class="tag global">global</span>` : d === "redo" ? `<span class="tag redo">redo</span>` : "",
+      isNew(m) ? `<span class="tag new">new fits</span>` : "", st ? `<span class="tag fit">${st}</span>` : ""].join(" ");
+    const btn = document.createElement("button");
+    btn.className = "brain"; btn.setAttribute("aria-current", m.brain === S.b);
+    btn.innerHTML = `<span>${m.brain}${m.wS1 ? ' <span title="wS1 probe" style="color:' + COL.wS1 + '">●</span>' : ""}</span><span>${tags}</span>`;
+    btn.onclick = () => select(m.brain);
+    $("#list").appendChild(btn);
+    $("#brainSel").insertAdjacentHTML("beforeend", `<option value="${m.brain}"${m.brain === S.b ? " selected" : ""}>${m.brain}${d ? " · " + d.replace("use_", "") : ""}</option>`);
+  });
+  const n = M.brains.filter((m) => decisionOf(DB.picks[m.brain])).length;
+  $("#nDone").textContent = n; $("#nAll").textContent = M.brains.length; $("#barFill").style.width = 100 * n / M.brains.length + "%";
+}
+
+async function select(b) {
+  S.b = b;
+  if (!DET[b]) {
+    renderList(); $("#view").innerHTML = `<p class="help">Loading ${esc(b)}…</p>`;
+    try { DET[b] = await (await fetch(`brains/${b}.json`)).json(); } catch (e) { $("#view").innerHTML = `<p class="msg err">Could not load ${esc(b)}. Reload the page.</p>`; return; }
+    if (S.b !== b) return;
+  }
+  const m = meta(), p = DB.picks[b];
+  const pv = p && m.variants.find((v) => v.id === p.variant);
+  S.A = pv ? pv.id : m.variants[0].id;
+  const refit = m.variants.filter((v) => v.kind !== "auto" && v.id !== S.A).sort((x, y) => y.made - x.made)[0];
+  S.B = (refit || m.variants.find((v) => v.id !== S.A) || {}).id || null;
+  if (S.tab === "seed" && !det().seed) S.tab = "compare";
+  if (!S.pts[b]) S.pts[b] = Object.assign({}, (DB.seeds[b] || {}).points_flat_rc || {});
+  if (S.seedNote[b] == null) S.seedNote[b] = (DB.seeds[b] || {}).note || "";
+  S.target = nextTarget();
+  V.fitted = false; V.w = 0;
+  render();
+}
+
+/* ------------------------------------------------------------------ canvas viewer (zoom / pan / click / drag) */
+const V = { s: 1, ox: 0, oy: 0, w: 0, fitted: false, cv: null, drag: null };
+const showingB = () => !!S.B && (S.hold || (S.flick && S.showB));
+function viewFit() {
+  const d = det(), c = V.cv; if (!c) return;
+  const [y0, y1, x0, x1] = d.box, w = c.width;
+  V.s = w / Math.max(y1 - y0, x1 - x0); V.ox = -x0 * V.s; V.oy = -y0 * V.s; V.fitted = true;
+}
+const toScr = (r, c) => [V.ox + c * V.s, V.oy + r * V.s];
+const toGrid = (x, y) => [(y - V.oy) / V.s, (x - V.ox) / V.s];
+function mountCanvas() {
+  const c = $("#cv canvas"); if (!c) return;
+  V.cv = c;
+  const dpr = window.devicePixelRatio || 1, w = c.clientWidth;
+  const pw = Math.round(w * dpr);
+  c.width = c.height = pw;
+  if (V.w && V.w !== pw) { const k = pw / V.w; V.s *= k; V.ox *= k; V.oy *= k; }
+  V.w = pw;
+  if (!V.fitted) viewFit();
+  c.onwheel = (e) => { e.preventDefault(); const r = c.getBoundingClientRect(), k = dpr, x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
+    const f = Math.exp(-e.deltaY * 0.0015); V.ox = x - (x - V.ox) * f; V.oy = y - (y - V.oy) * f; V.s *= f; draw(); };
+  c.onpointerdown = (e) => {
+    const r = c.getBoundingClientRect(), x = (e.clientX - r.left) * dpr, y = (e.clientY - r.top) * dpr;
+    let hit = null;
+    if (S.tab === "seed") for (const [k, [pr, pc]] of Object.entries(S.pts[S.b])) { const [sx, sy] = toScr(pr, pc); if (Math.hypot(sx - x, sy - y) < 10 * dpr) hit = k; }
+    V.drag = { x, y, ox: V.ox, oy: V.oy, moved: false, hit };
+    c.setPointerCapture(e.pointerId);
+  };
+  c.onpointermove = (e) => {
+    if (!V.drag) return;
+    const r = c.getBoundingClientRect(), x = (e.clientX - r.left) * dpr, y = (e.clientY - r.top) * dpr;
+    if (Math.hypot(x - V.drag.x, y - V.drag.y) > 4 * dpr) V.drag.moved = true;
+    if (!V.drag.moved) return;
+    if (V.drag.hit) { const [gr, gc] = toGrid(x, y); S.pts[S.b][V.drag.hit] = [+gr.toFixed(2), +gc.toFixed(2)]; S.dirty[S.b] = true; draw(); renderSeedSide(); }
+    else { V.ox = V.drag.ox + x - V.drag.x; V.oy = V.drag.oy + y - V.drag.y; draw(); }
+  };
+  c.onpointerup = (e) => {
+    const d = V.drag; V.drag = null; if (!d || d.moved || S.tab !== "seed") return;
+    if (d.hit) { S.target = d.hit; renderSeedSide(); draw(); return; }
+    if (!S.target) return;
+    const [gr, gc] = toGrid(d.x, d.y);
+    S.pts[S.b][S.target] = [+gr.toFixed(2), +gc.toFixed(2)]; S.dirty[S.b] = true;
+    S.target = nextTarget(); renderSeedSide(); draw();
+  };
+  draw();
+}
+function tile() {
+  const d = det();
+  if (S.tab === "seed") {
+    const ims = d.seed.images;
+    const sh = (i) => (i.sharpen || 0) === S.ssh;
+    return ims.find((i) => sh(i) && i.mode === S.sm && i.channel === S.sch && i.slab === S.sslab) || ims.find((i) => sh(i) && i.channel === S.sch) || ims[0];
+  }
+  const vid = showingB() ? S.B : S.A;
+  const key = S.bg === "fit" ? "fit_" + vid : S.bg;
+  const t = d.tiles.find((t) => t.key === key) || d.tiles[0];
+  return { src: d.sheet, tx: t.tx, ty: t.ty, label: t.label };
+}
+function path(g, poly, T) {
+  poly.forEach(([r, c], i) => { const [rr, cc] = T ? T(r, c) : [r, c]; const [x, y] = toScr(rr + 0.5, cc + 0.5); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.closePath();
+}
+function outlines(g, set, color, dash, lw, names, T) {
+  const dpr = window.devicePixelRatio || 1;
+  g.save(); g.strokeStyle = color; g.lineWidth = lw * dpr; g.setLineDash(dash.map((x) => x * dpr));
+  for (const [k, poly] of Object.entries(set)) { g.beginPath(); path(g, poly, T); g.stroke(); }
+  if (names && V.s > 1.2 * dpr) {
+    g.setLineDash([]); g.font = `600 ${11 * dpr}px IBM Plex Mono, monospace`; g.textAlign = "center"; g.textBaseline = "middle";
+    for (const [k, poly] of Object.entries(set)) {
+      let r = 0, c = 0; poly.forEach(([a, b]) => { r += a; c += b; }); r /= poly.length; c /= poly.length;
+      const [rr, cc] = T ? T(r, c) : [r, c]; const [x, y] = toScr(rr + 0.5, cc + 0.5);
+      g.lineWidth = 3 * dpr; g.strokeStyle = "rgba(0,0,0,.8)"; g.strokeText(k, x, y); g.fillStyle = color; g.fillText(k, x, y);
+    }
+  }
+  g.restore();
+}
+function ring(g, r, c, color, text, big) {
+  const dpr = window.devicePixelRatio || 1, [x, y] = toScr(r + 0.5, c + 0.5), rad = (big ? 9 : 7) * dpr;
+  g.save(); g.lineWidth = 4 * dpr; g.strokeStyle = "#000"; g.beginPath(); g.arc(x, y, rad, 0, 7); g.stroke();
+  g.lineWidth = 2 * dpr; g.strokeStyle = color; g.beginPath(); g.arc(x, y, rad, 0, 7); g.stroke();
+  if (text) { g.font = `700 ${12 * dpr}px Instrument Sans, sans-serif`; g.lineWidth = 3 * dpr; g.strokeStyle = "#000"; g.strokeText(text, x + rad + 3 * dpr, y - rad); g.fillStyle = "#fff"; g.fillText(text, x + rad + 3 * dpr, y - rad); }
+  g.restore();
+}
+function draw() {
+  const c = V.cv; if (!c || !det()) return;
+  const g = c.getContext("2d"), d = det(), [H, W] = d.shape, t = tile(), im = img(t.src);
+  g.fillStyle = "#000"; g.fillRect(0, 0, c.width, c.height);
+  if (!im.complete || !im.naturalWidth) { im.onload = () => draw(); }
+  else { g.imageSmoothingEnabled = V.s < 3; g.drawImage(im, t.tx, t.ty, W, H, V.ox, V.oy, W * V.s, H * V.s); }
+  let badge = "";
+  if (S.tab === "compare") {
+    if (S.glob) outlines(g, d.global_outlines, COL.G, [4, 3], 1, false);
+    const showA = !showingB(), vid = showA ? S.A : S.B;
+    if (!S.flick && !S.hold && S.B) outlines(g, d.outlines[S.B] || {}, COL.B, [5, 3], 1.4, false);
+    if (vid) outlines(g, d.outlines[vid] || {}, showA ? COL.A : COL.B, [], 1.6, S.names);
+    const fv = meta().variants.find((v) => v.id === vid);
+    badge = S.flick || S.hold ? `${showA ? "A" : "B"} · ${fv ? fv.label : ""}` : `A · ${fv ? fv.label : ""}${S.B ? "   + B dashed" : ""}`;
+    d.tracks.forEach((tr) => { const a = tr.at[vid] || tr; if (a.rc) ring(g, a.rc[0], a.rc[1], tr.target === "wS1" ? COL.wS1 : COL.trk, tr.name.split("/").pop(), tr.target === "wS1"); });
+  } else {
+    if (S.glob) outlines(g, d.global_outlines, "rgba(250,204,21,.8)", [4, 3], 1, false);
+    const f = seedFit();
+    if (f) outlines(g, d.global_outlines, COL.P, [], 1.3, S.names, f.T);
+    for (const [k, [r, cc]] of Object.entries(S.pts[S.b])) {
+      const col = "#f97316";  // seeds are ground truth: one colour
+      ring(g, r - 0.5, cc - 0.5, k === S.target ? "#60a5fa" : col, k, false);
+    }
+    badge = `${t.mode} · ${(d.seed.channel_names || {})[t.channel] || "ch" + t.channel} · slab ${t.slab}${t.sharpen ? " · sharpened ×" + t.sharpen : ""}`;
+  }
+  $("#cvbadge").textContent = badge;
+}
+
+/* ------------------------------------------------------------------ live seed fit (same model as register.py) */
+// similarity (rotation + scale + shift, no reflection) atlas centroid -> clicked point, least squares; points as
+// complex numbers r + i c: y = w (x - mx) + my, w = sum(conj(xc) yc) / sum|xc|^2
+function simil(names, A, P) {
+  const n = names.length; let mx = [0, 0], my = [0, 0];
+  names.forEach((k) => { mx[0] += A[k][0] / n; mx[1] += A[k][1] / n; my[0] += P[k][0] / n; my[1] += P[k][1] / n; });
+  let re = 0, im = 0, den = 0;
+  names.forEach((k) => { const a = [A[k][0] - mx[0], A[k][1] - mx[1]], b = [P[k][0] - my[0], P[k][1] - my[1]];
+    re += a[0] * b[0] + a[1] * b[1]; im += a[0] * b[1] - a[1] * b[0]; den += a[0] * a[0] + a[1] * a[1]; });
+  const wr = re / den, wi = im / den;
+  const T = (r, c) => { const x = r - mx[0], y = c - mx[1]; return [wr * x - wi * y + my[0], wi * x + wr * y + my[1]]; };
+  return { T, scale: Math.hypot(wr, wi), rot: Math.atan2(wi, wr) * 180 / Math.PI };
+}
+function seedFit() {
+  const d = det(), P = S.pts[S.b], A = d.atlas_centroids, names = Object.keys(P).filter((k) => A[k]);
+  if (names.length < 3) return null;
+  const f = simil(names, A, P), pix = M.pix_um;
+  f.res = {}; f.loo = {}; f.suggest = {};
+  names.forEach((k) => { const [r, c] = f.T(...A[k]); f.res[k] = Math.hypot(r - P[k][0], c - P[k][1]) * pix; });
+  names.forEach((k) => {
+    const others = names.filter((x) => x !== k);
+    const g = others.length >= 3 ? simil(others, A, P) : f;
+    const [r, c] = g.T(...A[k]); f.loo[k] = names.length >= 4 ? Math.hypot(r - P[k][0], c - P[k][1]) * pix : f.res[k];
+    let best = null, bd = 1e9;
+    for (const [n2, a] of Object.entries(A)) { const [rr, cc] = g.T(...a), dd = Math.hypot(rr - P[k][0], cc - P[k][1]) * pix; if (dd < bd) { bd = dd; best = n2; } }
+    if (best !== k && f.loo[k] > 80 && bd < f.loo[k] / 2) f.suggest[k] = best;
+  });
+  f.n = names.length; f.mean = names.reduce((s, k) => s + f.res[k], 0) / names.length;
+  return f;
+}
+function nextTarget() {
+  const P = S.pts[S.b] || {}, sk = S.skipped[S.b] || new Set();
+  return GUIDE.find((k) => !P[k] && !sk.has(k)) || M.barrels.find((k) => !P[k] && !sk.has(k)) || null;
+}
+
+/* ------------------------------------------------------------------ page */
+function probeLine(m, d) {
+  const ws = d.tracks.filter((t) => t.target === "wS1"), tr = ws.length ? ws : d.tracks;
+  if (!tr.length) return `<div class="probe none">No probe track crosses L4 in the barrel field of this brain.</div>`;
+  const p = DB.picks[m.brain], dec = decisionOf(p);
+  const rows = tr.map((t) => {
+    const nm = (x) => !x || !x.name ? "outside" : x.d_um ? `${x.name} (${x.d_um} µm off)` : x.name;
+    const fits = m.variants.map((v) => t.at[v.id]).filter(Boolean).map((x) => x.name);
+    const uniq = [...new Set(fits)];
+    const mine = dec === "use_local" ? t.at[p.variant] : dec ? t.global : null;
+    return { html: `<b>${esc(t.name)}</b>${t.target ? ` (${esc(t.target)})` : ""}: global <b>${esc(nm(t.global))}</b> · fits: ${uniq.map((u) => `<b>${esc(u || "outside")}</b>`).join(" / ")}${mine ? ` · your decision → <b>${esc(nm(mine))}</b>` : ""}`, agree: uniq.length <= 1 && uniq[0] === (t.global || {}).name };
+  });
+  const agree = rows.every((r) => r.agree);
+  return `<div class="probe ${agree ? "" : "differ"}">${agree ? "All fits and the global registration put the probe in the same barrel: the choice does not change its barrel label. " : "The fits disagree on the probe's barrel. "}${rows.map((r) => r.html).join("<br>")}</div>`;
+}
+function render() {
+  if (!M) return;
+  renderList();
+  const m = meta(), d = det();
+  if (!m || !d) return;
+  const st = fitState(m.brain);
+  let h = `<div class="head"><h2>${m.brain}</h2>${st ? `<span class="tag fit">${st}</span>` : ""}${isNew(m) ? `<span class="tag new">new fits since your decision</span>` : ""}
+    <div class="tabs" role="tablist"><button role="tab" data-t="compare" aria-selected="${S.tab === "compare"}">Compare fits</button><button role="tab" data-t="seed" aria-selected="${S.tab === "seed"}" ${d.seed ? "" : "disabled title='No seed images for this brain yet'"}>Seed</button></div></div>
+    ${probeLine(m, d)}
+    <div class="cols"><div class="viewer"><div class="cv${S.tab === "seed" ? " seed" : ""}" id="cv"><canvas></canvas><span class="badge" id="cvbadge"></span></div><div class="vbar" id="vbar"></div></div><div id="side"></div></div>`;
+  $("#view").innerHTML = h;
+  $("#view").querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { if (!b.disabled) { S.tab = b.dataset.t; render(); } });
+  if (S.tab === "compare") { renderCompareBar(); renderCompareSide(); } else { renderSeedBar(); renderSeedSide(); }
+  mountCanvas();
+}
+function seg(items, val, on, fmt = (x) => x) {
+  const el = document.createElement("div"); el.className = "seg";
+  el.innerHTML = items.map(([v, t]) => `<button data-v="${v}" aria-pressed="${String(v) === String(val)}">${esc(fmt(t))}</button>`).join("");
+  el.querySelectorAll("button").forEach((b) => b.onclick = () => on(b.dataset.v));
+  return el;
+}
+function renderCompareBar() {
+  const d = det(), bar = $("#vbar"); bar.innerHTML = "";
+  const bgs = [["fit", "fit's own slab"]].concat(d.tiles.filter((t) => !t.key.startsWith("fit_")).map((t) => [t.key, t.key.replace("_", " ")]));
+  bar.append("Image ", seg(bgs, S.bg, (v) => { S.bg = v; renderCompareBar(); draw(); }));
+  bar.append(seg([["overlay", "A + B"], ["flicker", "Flicker A/B"]], S.flick ? "flicker" : "overlay", (v) => { setFlick(v === "flicker"); }));
+  bar.insertAdjacentHTML("beforeend", `<label><input type="checkbox" id="cbG" ${S.glob ? "checked" : ""}> global</label><label><input type="checkbox" id="cbN" ${S.names ? "checked" : ""}> names</label><button class="sbtn" id="reset">Reset view</button>`);
+  $("#cbG").onchange = (e) => { S.glob = e.target.checked; draw(); };
+  $("#cbN").onchange = (e) => { S.names = e.target.checked; draw(); };
+  $("#reset").onclick = () => { viewFit(); draw(); };
+  bar.insertAdjacentHTML("beforeend", `<p class="help" style="width:100%">Cyan = fit A, orange dashed = fit B, white dashed = global. Rings = probe tracks at L4 (red = wS1). Scroll to zoom, drag to pan. <kbd>f</kbd> flicker, hold <kbd>space</kbd> to show B.</p>`);
+}
+let flickTimer = null;
+function setFlick(on) {
+  S.flick = on; clearInterval(flickTimer); S.showB = false;
+  if (on) flickTimer = setInterval(() => { S.showB = !S.showB; draw(); }, 700);
+  renderCompareBar(); draw();
+}
+function renderCompareSide() {
+  const m = meta(), d = det(), p = DB.picks[m.brain], dec = decisionOf(p);
+  const auto = m.variants.filter((v) => v.kind === "auto"), bestAuto = Math.max(...auto.map((v) => v.matched), 0);
+  const bm = Math.max(...m.variants.map((v) => v.matched)), bc = Math.max(...m.variants.map((v) => v.contrast)), bl = Math.min(...m.variants.map((v) => v.loo_um ?? 1e9));
+  const ws = d.tracks.filter((t) => t.target === "wS1"), tr = ws.length ? ws : d.tracks.slice(0, 1);
+  const pb = (vid) => tr.map((t) => (t.at[vid] || {}).name || "–").join(" / ");
+  let h = `<div class="box"><h3>Fits (${m.variants.length})</h3><table><thead><tr><th>#</th><th>Fit</th><th title="Atlas barrels paired with tissue barrels; more = better constrained">Match</th><th title="Barrel-core minus septum contrast after the fit; pass ≥ 0.30">Contr.</th><th title="Leave-one-out warp error of matched barrels (µm, lower = better)">LOO</th><th title="Mean distance of your clicks from the rigidly placed atlas (µm): how much this brain differs from the average shape">Seed</th><th title="Barrel the ${ws.length ? "wS1 " : ""}probe crosses L4 in">Probe</th><th title="View as A (cyan) or B (orange)">A/B</th></tr></thead><tbody>`;
+  m.variants.forEach((v, i) => {
+    const dm = v.kind !== "auto" ? v.matched - bestAuto : null;
+    h += `<tr class="${v.id === S.A ? "isA" : ""} ${v.id === S.B ? "isB" : ""} ${p && p.variant === v.id ? "mine" : ""}"><td class="l"><span class="k">${i + 1}</span></td>
+      <td class="l">${esc(v.label)}${v.kind !== "auto" ? `<span class="kind">${v.kind}</span>` : ""}${p && p.variant === v.id ? ` <span class="tag local">your pick</span>` : ""}${p && v.kind !== "auto" && v.made > Date.parse(p.at) / 1000 ? ` <span class="tag new">new</span>` : ""}</td>
+      <td><span class="${v.matched === bm ? "best" : ""}">${v.matched}</span>${dm != null ? ` <small style="color:${dm > 0 ? "var(--good)" : dm < 0 ? "var(--bad)" : "var(--muted)"}">${dm > 0 ? "+" : ""}${dm}</small>` : ""}</td>
+      <td><span class="${v.contrast === bc ? "best" : ""}" style="${v.contrast < 0.3 ? "color:var(--bad)" : ""}">${v.contrast.toFixed(2)}</span></td>
+      <td><span class="${v.loo_um === bl ? "best" : ""}">${v.loo_um ?? "–"}</span></td><td style="${(v.seed_residual_um || 0) > 100 ? "color:var(--bad)" : ""}">${v.seed_residual_um ?? ""}</td>
+      <td>${esc(pb(v.id))}</td><td><span class="ab"><button class="a" data-v="${v.id}" aria-pressed="${v.id === S.A}">A</button><button class="b" data-v="${v.id}" aria-pressed="${v.id === S.B}">B</button></span></td></tr>`;
+  });
+  h += `<tr><td class="l"></td><td class="l">Global (brainreg)</td><td colspan="4" style="color:var(--muted)">${m.variants[0].err_brainreg_um != null ? `~${m.variants[0].err_brainreg_um} µm from the tissue barrels` : ""}</td><td>${esc(tr.map((t) => (t.global || {}).name || "–").join(" / "))}</td><td></td></tr>`;
+  h += `</tbody></table><p class="help">Green = best per column; small number = matched barrels gained over the best automatic fit. <kbd>1</kbd>–<kbd>9</kbd> view as A, <kbd>shift</kbd>+number as B.</p></div>`;
+  const vA = m.variants.find((v) => v.id === S.A);
+  h += `<div class="box"><h3>Decision</h3><div class="decide">
+      <button class="d-local" data-d="use_local" aria-pressed="${dec === "use_local" && p.variant === S.A}" ${canWrite ? "" : "disabled"}>Use A: ${esc(vA ? vA.label : "")} <kbd>p</kbd></button>
+      <button class="d-global" data-d="use_global" aria-pressed="${dec === "use_global"}" ${canWrite ? "" : "disabled"}>Global is better <kbd>g</kbd></button>
+      <button class="d-redo" data-d="redo" aria-pressed="${dec === "redo"}" ${canWrite ? "" : "disabled"}>Redo <kbd>r</kbd></button></div>
+      ${dec === "use_local" && p.variant !== S.A ? `<p class="help" style="margin:0 0 6px">Current decision: ${esc((m.variants.find((v) => v.id === p.variant) || {}).label || p.variant)}.</p>` : ""}
+      ${p && p.note && staleNote(p) ? `<div class="oldnote">Earlier note (other decision): <s>${esc(p.note)}</s> <button class="sbtn" id="keepNote">Keep it</button></div>` : ""}
+      <label class="help" for="note">Note for this decision</label><textarea id="note" placeholder="What you see, or what to try next">${p && p.note && !staleNote(p) ? esc(p.note) : ""}</textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="sbtn warn" id="reqSharp" ${canWrite ? "" : "disabled"}>Request sharpened refit</button>${d.seed ? `<button class="sbtn" id="goSeed">Seed this brain →</button>` : ""}</div>
+      <div class="msg" id="msg"></div></div>
+    <details class="info box"><summary>What the measures mean</summary><dl>
+      <dt>Match</dt><dd>Atlas barrels paired with a tissue barrel in the fit.</dd>
+      <dt>Contrast</dt><dd>Band-passed L4 image: barrel cores minus septa, in field SD, after the fit. Pass ≥ 0.30. With a lesion mask it is measured on unmasked tissue only.</dd>
+      <dt>LOO</dt><dd>Each matched barrel left out, warp refit, distance of where it lands (µm). Consistency, not correctness: a fit shifted by one barrel can have a low LOO.</dd>
+      <dt>Seed</dt><dd>Mean distance between your clicks and the rigidly placed average atlas (µm): how far this brain&#39;s shape is from the average. Not a click error.</dd>
+      <dt>Probe</dt><dd>Barrel at the probe track's L4 crossing under this fit (red rings on the image).</dd></dl></details>`;
+  $("#side").innerHTML = h;
+  $("#side").querySelectorAll(".ab button").forEach((b) => b.onclick = () => { if (b.classList.contains("a")) S.A = b.dataset.v; else S.B = b.dataset.v === S.B ? null : b.dataset.v; renderCompareSide(); draw(); });
+  $("#side").querySelectorAll(".decide button").forEach((b) => b.onclick = () => decide(b.dataset.d));
+  $("#note").addEventListener("change", (e) => saveNote(e.target.value));
+  const kn = $("#keepNote"); if (kn) kn.onclick = () => saveNote(p.note);
+  $("#reqSharp").onclick = () => request("sharpen");
+  const gs = $("#goSeed"); if (gs) gs.onclick = () => { S.tab = "seed"; render(); };
+}
+const noteKey = (p) => decisionOf(p) === "use_local" ? p.variant : decisionOf(p);
+const staleNote = (p) => p.note_for !== undefined && p.note_for !== noteKey(p) || (p.note_for === undefined && decisionOf(p) === "use_local" && /global is better/i.test(p.note || ""));
+
+async function write(col, id, body) {
+  if (!db) { setMsg(NOSAVE, true); return false; }
+  try { await db.doc(`${col}/${id}`).set(body); setMsg("Saved."); return true; }
+  catch (e) { if (e && (e.code === "not_granted" || e.code === "invalid_argument")) { canWrite = false; render(); }
+    setMsg("Not saved: " + (e && e.message ? e.message : "the store did not answer") + ".", true); return false; }
+}
+function decide(dec) {
+  const m = meta(), prev = DB.picks[m.brain] || {};
+  const variant = dec === "use_local" ? S.A : "none";
+  const body = { brain: m.brain, variant, decision: dec, note: "", note_for: dec === "use_local" ? variant : dec, final_at_pick: prev.final_at_pick || "", at: new Date().toISOString() };
+  const t = $("#note") && $("#note").value.trim(); if (t && t !== (prev.note || "").trim()) body.note = t;  // old note stays with the old decision
+  if (prev.note && !body.note) body.note_prev = prev.note;
+  DB.picks[m.brain] = body; render(); write("picks", m.brain, body);
+}
+function saveNote(t) {
+  const m = meta(), prev = DB.picks[m.brain] || { brain: m.brain, variant: "" };
+  const body = Object.assign({}, prev, { note: t, note_for: noteKey(prev), at: prev.at || new Date().toISOString() });
+  DB.picks[m.brain] = body; write("picks", m.brain, body); renderCompareSide();
+}
+async function request(kind) {
+  const b = S.b; const body = { brain: b, kind, at: new Date().toISOString() };
+  DB.requests[b] = body; if (await write("requests", b, body)) setMsg((kind === "sharpen" ? "Sharpened refit requested. " : "Fit requested. ") + (db && db.local ? `Saved to db/requests/${b}.json: run scripts/run_variants.sh ${kind === "sharpen" ? "sharpen" : "seeded"} for it, then rebuild the page.` : "Claude runs it and the fits appear here.")); renderList();
+}
+
+/* ------------------------------------------------------------------ seed tab */
+function renderSeedBar() {
+  const d = det(), bar = $("#vbar"), sd = d.seed; bar.innerHTML = "";
+  const chs = [...new Set(sd.images.map((i) => i.channel))];
+  if (!chs.includes(S.sch)) S.sch = chs[0];
+  if (!sd.slabs.includes(S.sslab)) S.sslab = sd.slabs[0];
+  bar.append("Version ", seg(sd.modes.map((x, i) => [x, `${i + 1} ${x}`]), S.sm, (v) => { S.sm = v; renderSeedBar(); draw(); }));
+  bar.append("Channel ", seg(chs.map((c) => [c, sd.channel_names[c] || "ch" + c]), S.sch, (v) => { S.sch = +v; renderSeedBar(); draw(); }));
+  bar.append("Slab ", seg(sd.slabs.map((s) => [s, isNaN(+s) ? s : (+s > 0 ? "+" : "") + s]), S.sslab, (v) => { S.sslab = v; renderSeedBar(); draw(); }));
+  const shs = sd.sharpen || [0];
+  if (!shs.includes(S.ssh)) S.ssh = shs[0];
+  if (shs.length > 1) bar.append("Sharpen ", seg(shs.map((a) => [a, a ? "×" + a : "off"]), S.ssh, (v) => { S.ssh = +v; renderSeedBar(); draw(); }));
+  bar.insertAdjacentHTML("beforeend", `<label><input type="checkbox" id="cbG" ${S.glob ? "checked" : ""}> global</label><label><input type="checkbox" id="cbN" ${S.names ? "checked" : ""}> names</label><button class="sbtn" id="reset">Reset view</button>
+    <p class="help" style="width:100%">Click the centre of the barrel asked for; drag a ring to move it. Green outlines (from 3 seeds) = preview of the average atlas placed on your clicks. <kbd>1</kbd>–<kbd>6</kbd> version, <kbd>c</kbd> channel, <kbd>[</kbd> <kbd>]</kbd> slab, <kbd>h</kbd> sharpen, <kbd>s</kbd> skip, <kbd>u</kbd> undo. band: barrels bright; L4spec: L4 minus L2/3 and L5 (damaged brains); septa: dark septa lines; auto slab: per region the depth with the strongest barrel texture.</p>`);
+  $("#cbG").onchange = (e) => { S.glob = e.target.checked; draw(); };
+  $("#cbN").onchange = (e) => { S.names = e.target.checked; draw(); };
+  $("#reset").onclick = () => { viewFit(); draw(); };
+}
+function renderSeedSide() {
+  const b = S.b, P = S.pts[b], f = seedFit(), sv = DB.seeds[b], st = fitState(b);
+  const ks = Object.keys(P);
+  let h = `<div class="box"><h3>Next</h3>${S.target ? `<div>Click <span class="target">${esc(S.target)}</span></div>` : `<div class="help">All guided barrels placed or skipped. Pick any barrel below.</div>`}
+    <div style="display:flex;gap:6px;margin-top:8px"><button class="sbtn" id="skip" ${S.target ? "" : "disabled"}>Skip <kbd>s</kbd></button><button class="sbtn" id="undo" ${ks.length ? "" : "disabled"}>Undo <kbd>u</kbd></button></div>
+    <div class="help" style="margin-top:8px">Or click any barrel:</div><div class="chips" id="chips">${M.barrels.map((k) => `<button class="${P[k] ? "placed" : ""}" aria-pressed="${k === S.target}" data-k="${k}">${k}</button>`).join("")}</div></div>
+    <div class="box seeds"><h3>Seeds (${ks.length})</h3>`;
+  if (!ks.length) h += `<p class="help">None yet. Place 5–8 barrels spread over the field.</p>`;
+  else {
+    h += `<ul>${ks.map((k) => { const q = f ? f.loo[k] : null, cls = "";
+      return `<li><span>${esc(k)}</span><span class="${cls}">${q == null ? "–" : Math.round(q) + " µm"}</span><button data-k="${k}" title="Delete ${k}">✕</button></li>`; }).join("")}</ul>`;
+    h += f ? `<div class="fitsum">Placement through ${f.n} seeds: scale ${f.scale.toFixed(2)}, rotation ${f.rot.toFixed(0)}°, atlas-shape misfit ${Math.round(f.mean)} µm</div>
+      <p class="help">Green outlines: a preview only — the average atlas map, scaled and rotated as one piece to sit on your clicks. Per seed: how far the rigid atlas lands from your click (µm); this is the brain&#39;s shape differing from the average, which the fit then corrects.</p>` : `<p class="help">The placement shows from 3 seeds.</p>`;
+  }
+  h += `<label class="help" for="snote">Note</label><textarea id="snote" placeholder="Optional">${esc(S.seedNote[b])}</textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="sbtn" id="save" ${ks.length >= 3 && db && canWrite ? "" : "disabled"}>Save seeds</button><button class="sbtn primary" id="submit" ${ks.length >= 3 && db && canWrite ? "" : "disabled"}>Save and request fit</button></div>
+    <p class="help">${sv ? `Saved ${new Date(sv.at).toLocaleString()} (${Object.keys(sv.points_flat_rc || {}).length} seeds)${S.dirty[b] ? " · unsaved changes" : ""}.` : ks.length < 3 ? "At least 3 seeds to save." : "Not saved yet."}${st ? ` Fit: ${st}.` : ""}</p><div class="msg" id="msg"></div></div>`;
+  $("#side").innerHTML = h;
+  $("#skip").onclick = skip; $("#undo").onclick = undo;
+  $("#side").querySelectorAll("#chips button").forEach((x) => x.onclick = () => { S.target = x.dataset.k; renderSeedSide(); draw(); });
+  $("#side").querySelectorAll(".seeds li button").forEach((x) => x.onclick = () => { delete P[x.dataset.k]; S.dirty[b] = true; S.target = nextTarget(); renderSeedSide(); draw(); });
+  $("#snote").oninput = (e) => { S.seedNote[b] = e.target.value; };
+  $("#save").onclick = () => saveSeeds(false); $("#submit").onclick = () => saveSeeds(true);
+}
+function skip() { if (!S.target) return; (S.skipped[S.b] = S.skipped[S.b] || new Set()).add(S.target); S.target = nextTarget(); renderSeedSide(); draw(); }
+function undo() { const P = S.pts[S.b], ks = Object.keys(P); if (!ks.length) return; const k = ks[ks.length - 1]; delete P[k]; S.target = k; S.dirty[S.b] = true; renderSeedSide(); draw(); }
+async function saveSeeds(andFit) {
+  const b = S.b, t = tile(), at = new Date().toISOString();
+  const body = { brain: b, points_flat_rc: S.pts[b], n: Object.keys(S.pts[b]).length, image_channel: t.channel, image_slab: t.slab, image_mode: t.mode, image_sharpen: t.sharpen || 0,
+    note: S.seedNote[b] || "", grid: "template flat, 10 um px, [row, col]", at };
+  const f = seedFit(); if (f) body.live_mean_residual_um = Math.round(f.mean);
+  if (await write("seeds", b, body)) { DB.seeds[b] = body; S.dirty[b] = false; if (andFit) await request("seeded"); renderSeedSide(); }
+}
+
+/* ------------------------------------------------------------------ keys */
+document.addEventListener("keydown", (e) => {
+  if (!M || !det() || e.target.closest("textarea, input, select")) return;
+  const k = e.key;
+  if (k === "j" || k === "ArrowDown") { e.preventDefault(); step(1); return; }
+  if (k === "k" || k === "ArrowUp") { e.preventDefault(); step(-1); return; }
+  if (k === "t") { if (det().seed) { S.tab = S.tab === "seed" ? "compare" : "seed"; render(); } return; }
+  const m = meta();
+  if (S.tab === "compare") {
+    const dg = /^Digit([1-9])$/.exec(e.code);
+    if (dg) { const v = m.variants[+dg[1] - 1]; if (v) { if (e.shiftKey) S.B = v.id; else S.A = v.id; renderCompareSide(); draw(); } return; }
+    if (k === "f") setFlick(!S.flick);
+    else if (k === " ") { e.preventDefault(); if (!e.repeat && S.B) { S.hold = true; draw(); } }
+    else if (k === "p") decide("use_local"); else if (k === "g") decide("use_global"); else if (k === "r") decide("redo");
+  } else {
+    const sd = det().seed;
+    if (/^[1-9]$/.test(k) && sd.modes[+k - 1]) { S.sm = sd.modes[+k - 1]; renderSeedBar(); draw(); }
+    else if (k === "c") { const chs = [...new Set(sd.images.map((i) => i.channel))]; S.sch = chs[(chs.indexOf(S.sch) + 1) % chs.length]; renderSeedBar(); draw(); }
+    else if (k === "[" || k === "]") { const i = sd.slabs.indexOf(S.sslab) + (k === "]" ? 1 : -1); S.sslab = sd.slabs[(i + sd.slabs.length) % sd.slabs.length]; renderSeedBar(); draw(); }
+    else if (k === "h") { const shs = sd.sharpen || [0]; S.ssh = shs[(shs.indexOf(S.ssh) + 1) % shs.length]; renderSeedBar(); draw(); }
+    else if (k === "s") skip(); else if (k === "u" || (k === "z" && (e.ctrlKey || e.metaKey))) { e.preventDefault(); undo(); }
+  }
+});
+document.addEventListener("keyup", (e) => { if (e.key === " " && S.hold) { S.hold = false; draw(); } });
+function step(dlt) { const v = shown().map((m) => m.brain); if (!v.length) return; let i = v.indexOf(S.b); i = i < 0 ? 0 : Math.min(v.length - 1, Math.max(0, i + dlt)); select(v[i]).then(() => { const a = $("#list .brain[aria-current='true']"); if (a) a.scrollIntoView({ block: "nearest" }); }); }
+$("#brainSel").onchange = (e) => select(e.target.value);
+window.addEventListener("resize", () => { if (V.cv) mountCanvas(); });
+
+/* ------------------------------------------------------------------ storage: claude.ai page database, else the local server */
+const NOSAVE = "Decisions and seeds can't be saved in this view. Open the page on claude.ai, or locally with: python scripts/review_server.py <page folder>";
+async function localDb() {  // scripts/review_server.py: JSON files in <page folder>/db/<collection>/<id>.json
+  try { if (!(await fetch("api/ping", { cache: "no-store" })).ok) return null; } catch (e) { return null; }
+  const subs = {};
+  const pull = async (col) => {
+    const o = await (await fetch(`api/${col}`, { cache: "no-store" })).json();
+    (subs[col] || []).forEach((cb) => cb({ docs: Object.entries(o).map(([id, x]) => ({ id, data: () => x })) }));
+  };
+  return {
+    local: true,
+    collection: (col) => ({ onSnapshot(cb, err) { (subs[col] = subs[col] || []).push(cb); pull(col).catch(() => err && err({ code: "unavailable" })); return () => {}; } }),
+    doc: (path) => ({ async set(body) {
+      const r = await fetch(`api/${path}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) throw { code: "unavailable", message: "the local server refused the write" };
+      pull(path.split("/")[0]);
+    } }) };
+}
+
+/* ------------------------------------------------------------------ start */
+(async () => {
+  try { M = await (await fetch("manifest.json")).json(); } catch (e) { $("#view").innerHTML = `<p class="msg err">The brain list did not load. Reload the page.</p>`; return; }
+  const first = (shown()[0] || M.brains[0]).brain;
+  select(first);
+  try { db = await claude.use("db"); } catch (e) { db = null; }
+  if (!db) db = await localDb();
+  if (!db) { setMsg(NOSAVE, true); return; }
+  const t = setTimeout(() => setMsg("Saved decisions can't be reached yet.", true), 10000);
+  let first2 = true;
+  for (const col of Object.keys(DB)) {
+    db.collection(col).onSnapshot((s) => {
+      clearTimeout(t);
+      const o = {}; s.docs.forEach((d) => { const x = d.data(); if (x) o[d.id] = x; }); DB[col] = o;
+      if (col === "seeds") for (const [b, x] of Object.entries(o)) if (!S.dirty[b]) { S.pts[b] = Object.assign({}, x.points_flat_rc || {}); S.seedNote[b] = x.note || ""; }
+      if (col === "picks" && first2) { first2 = false; if (S.filter === "todo" && !shown().some((m) => m.brain === S.b) && shown().length) { select(shown()[0].brain); return; } }
+      if (S.b && DET[S.b]) { if (col === "picks" && !V.drag) { const p = o[S.b], m = meta(); if (p && m.variants.some((v) => v.id === p.variant) && S.A === m.variants[0].id) S.A = p.variant; } render(); }
+    }, (e) => setMsg(`Could not load ${col} (${e.code}).`, true));
+  }
+})();
+</script>
+</body></html>
