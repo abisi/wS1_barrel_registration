@@ -77,7 +77,15 @@ class Config:
         return self.dir_pattern.format(data_root=self.data_root, brain=bid, **self.params.loc[bid].to_dict())
 
     def ds_file(self, reg, ch):
-        return [f for f in glob.glob(f"{reg}/{self.channel_glob.format(ch=ch)}") if "standard" not in f][0]
+        f = [f for f in glob.glob(f"{reg}/{self.channel_glob.format(ch=ch)}") if "standard" not in f]
+        if not f:
+            raise FileNotFoundError(f"no downsampled channel {ch} in {reg} (channel_glob {self.channel_glob})")
+        return f[0]
+
+    def channels(self, reg, max_ch=8):
+        """Image channels with a downsampled file in this brainreg folder (0, 1, ...)."""
+        return [c for c in range(max_ch)
+                if any("standard" not in f for f in glob.glob(f"{reg}/{self.channel_glob.format(ch=c)}"))]
 
     def raw_ch0(self, bid):
         return glob.glob(self.raw_ch0_glob.format(data_root=self.data_root, brain=bid))[0]

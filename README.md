@@ -43,7 +43,7 @@ When the automatic search fails, two fallbacks: **sharpened** images (unsharp ma
 ## Workflow at a glance
 
 ```
-first pass (wide ch0 / ch1, lesion mask where needed)  →  review page: decide per brain
+first pass (wide search on every image channel, lesion mask where needed)  →  review page: decide per brain by eye
    →  refits for the rest (sharpened, seeded)  →  review again  →  export (project folder + mouse Anatomy folders)
 ```
 
@@ -64,7 +64,7 @@ On the lab server, the existing environment already has everything:
 
 | What | Where it comes from |
 |---|---|
-| brainreg output per brain | `registered_atlas.tiff`, `registered_hemispheres.tiff`, `deformation_field_{0,1,2}.tiff`, downsampled ch0 (and ch1), at 20 or 10 µm. Any atlas with Allen region IDs works (tested with `perens_lsfm_mouse_20um` and `allen_mouse_bluebrain_barrels_10um`). |
+| brainreg output per brain | `registered_atlas.tiff`, `registered_hemispheres.tiff`, `deformation_field_{0,1,2}.tiff`, downsampled image channels (ch0, and any others such as ch1; each fit is scored on every channel present), at 20 or 10 µm. Any atlas with Allen region IDs works (tested with `perens_lsfm_mouse_20um` and `allen_mouse_bluebrain_barrels_10um`). |
 | `allen_mouse_bluebrain_barrels_10um` | brainglobe atlas folder (needs `annotation.tiff`) |
 | `flatmap_float.nrrd` | Blue Brain flatmap of the CCF, 10 µm |
 | annotation of the registration atlas (`.npy` or `.tiff`) | only for a consistency check of the deformation fields, and for the cell-count comparison |
@@ -95,7 +95,7 @@ python -m barrelreg -c config.toml export               # overview figures + cel
 Several variants per brain (one folder each), as used for the AB / MH dataset:
 
 ```bash
-scripts/run_variants.sh wide    BASE RUN/variants  <brains>            # wide search, ch0 and ch1
+scripts/run_variants.sh wide    BASE RUN/variants  <brains>            # wide search, one fit per image channel
 scripts/run_variants.sh lesion  BASE RUN/variants  <brains>            # + lesion mask
 scripts/run_variants.sh sharpen BASE REDO/variants <brains>            # + unsharp mask x1, x2
 scripts/run_variants.sh seeded  BASE REDO/variants --seeds seeds.json <brains>
@@ -134,11 +134,17 @@ Hemispheres: brainglobe value 1 = left, 2 = right. Details: [Outputs and export]
 
 ## Quality control
 
+**The choice of fit is qualitative**: fits are compared by eye on the slab images (overlay, flicker, other channels
+and depths): rows, arcs and straddlers on the tissue barrels, agreement between fits, the probe barrel. A fit shifted by
+a whole row can score well, so no single metric decides. The metrics rank the fits and flag failures:
+
 - **`contrast_after` < 0.3: failed fit** (good fits ≥ 0.6).
 - **`naming_ambiguous`: check by eye**; a fit shifted by one row can still score well.
 - **`n_matched`, `err_tps_loo_um`**: more matches and lower leave-one-out error = better constrained.
 - **`surface_bridged_frac` > 0.1**: damaged surface. **`field_check`** should be 1.000.
 - Seeded brains: score fits against the clicks with `scripts/click_agreement.py`.
+- **Hemisphere:** the AB / MH dataset is fitted on the left hemisphere only (brainglobe value 1); every fit and
+  export has `h1` only, and the barrel voxels lie in registered hemisphere 1.
 
 All fields: [Metrics](https://github.com/abisi/wS1_barrel_registration/wiki/Metrics).
 
@@ -169,6 +175,8 @@ All fields: [Metrics](https://github.com/abisi/wS1_barrel_registration/wiki/Metr
 | `map_channels_example.py`, `map_units_compare.py` | map probe channels / units through the final fits |
 | `compare_outputs.py`, `compare_runs.py`, `edge_check.py` | checks between runs |
 | `make_wiki_screenshots.py` | screenshots of the review page for the wiki |
+
+Changes relative to the source repository: [CHANGELOG.md](CHANGELOG.md).
 
 ## Provenance
 

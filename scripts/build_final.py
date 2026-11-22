@@ -3,7 +3,7 @@ otherwise the passing run with the highest contrast, otherwise the primary run (
 
 usage: python scripts/build_final.py --runs LABEL=DIR [LABEL=DIR ...] --out DIR [--ref DIR] [--hemisphere 1]
                                      [--score contrast_both]
-The first run is the primary. With --score contrast_both (runs that score each fit on both image channels) there is
+The first run is the primary. With --score contrast_both (runs that score each fit on every image channel) there is
 no primary: the variant with the highest mean ch0 / ch1 contrast is chosen, and a hemisphere passes when its chosen fit
 separates barrels from septa (contrast >= 0.3) in at least one of the two images. Each chosen <run>/<ID>/results/ is copied to <out>/<ID>/results/ with source.json
 (chosen run, every candidate's contrast / matched barrels, reference contrast). Writes <out>/selection.csv and the
@@ -63,7 +63,7 @@ def main():
             continue
         p0 = runs[0][0]
         if a.score == "contrast_both":
-            ok = {k: max(v.get("contrast_after_ch0", 0), v.get("contrast_after_ch1", 0)) >= FAIL for k, v in cand.items()}
+            ok = {k: max([x for c, x in v.items() if c.startswith("contrast_after_ch")] or [0]) >= FAIL for k, v in cand.items()}
         else:
             ok = {k: v["contrast_after"] >= FAIL for k, v in cand.items()}
         if a.score == "contrast_both":
@@ -87,8 +87,8 @@ def main():
                     reference_passed=bool(mr["contrast_after"] >= FAIL) if mr else None, score=a.score,
                     candidates={k: dict(contrast_after=round(v["contrast_after"], 3), n_matched=v["n_matched"],
                                         l4_offset_um=v["l4_offset_um"],
-                                        **{c: round(v[c], 3) for c in ("contrast_both", "contrast_after_ch0",
-                                                                       "contrast_after_ch1") if c in v})
+                                        **{c: round(x, 3) for c, x in v.items()
+                                           if c == "contrast_both" or c.startswith("contrast_after_ch")})
                                 for k, v in cand.items()},
                     candidate_dirs={k: dict(runs)[k] for k in cand})
         json.dump(info, open(f"{dst}/source.json", "w"), indent=1, default=float)

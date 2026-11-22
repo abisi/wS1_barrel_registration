@@ -11,7 +11,8 @@ Project folder (--out), one sub-folder per brain (all brains, incl. several brai
                 debug*.npz are not copied (they stay in <run>/variants/<variant>/<brain>/results/h1).
   use_global / redo -> registration_info.json only.
 Anatomy (--data-root/<mouse>/<session>/Anatomy/wS1_barrel_registration/, every session folder of the mouse that has an
-Anatomy folder): one brain per mouse. Among the mouse's brains: a use_local brain (highest contrast if several),
+Anatomy folder): one brain per mouse. Among the mouse's brains: a use_local brain (if several: --prefer, then the one
+with annotated probe tracks, then the highest contrast),
 else registration_info.json saying use_global (or redo pending). Files: barrels_corrected_full.tif, ccf_field_*.tif,
 barrel_index.csv, metrics.json, l4_bottom_patches.csv, report pngs, registration_info.json, README.txt.
 """
@@ -48,6 +49,12 @@ def cp(src, dst):
     shutil.copyfile(src, dst)  # NAS refuses chmod / utime
 
 
+def tracks_counter(params_csv):
+    """brain -> number of annotated probe tracks (<reg_dir>/segmentation/sample_space/tracks/**/*.points)"""
+    reg = {r["brain"]: r.get("reg_dir") for r in pd.read_csv(params_csv).to_dict("records")}
+    return lambda b: len(glob.glob(f"{reg.get(b)}/segmentation/sample_space/tracks/**/*.points", recursive=True)) if reg.get(b) else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
@@ -55,9 +62,11 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--data-root", required=True)
     ap.add_argument("--variants", nargs="*", default=[])
+    ap.add_argument("--prefer", nargs="*", default=[], help="brains preferred for their mouse's Anatomy folders")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     picks = pd.read_csv(a.picks, keep_default_na=False)
+    n_tracks = tracks_counter(f"{a.run}/registration_params.csv")
     sel = pd.read_csv(f"{a.run}/selection.csv").set_index("brain")
     today = date.today().isoformat()
     infos = {}
@@ -99,7 +108,9 @@ def main():
     for mouse, brains in pd.Series(list(infos)).groupby(pd.Series([mouse_of(b) for b in infos])):
         cand = [infos[b] for b in brains]
         loc = [c for c in cand if c["decision"] == "use_local"]
-        chosen = max(loc, key=lambda c: c["contrast_after"]) if loc else (
+        # several use_local brains of one mouse: --prefer, then the brain with annotated probe tracks (the units are
+        # linked through them), then the highest contrast
+        chosen = max(loc, key=lambda c: (c["brain"] in a.prefer, n_tracks(c["brain"]), c["contrast_after"])) if loc else (
             next((c for c in cand if c["decision"] == "redo"), None) or cand[0])
         sessions = sorted(glob.glob(f"{a.data_root}/{mouse}/{mouse}_*/Anatomy"))
         for an in sessions:

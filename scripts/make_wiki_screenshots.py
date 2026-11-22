@@ -78,6 +78,8 @@ def main():
             pg.locator("#side").screenshot(path=out("06_seed_panel.png"))
             brain(pg, BRAINS["seed_plain"], "seed")
             pg.screenshot(path=out("07_seed_AB126.png"))
+            brain(pg, BRAINS["seed"], "compare")  # Compare tab of the seeded brain: seeded and sharpened refits next to the first pass
+            pg.screenshot(path=out("09_compare_seeded_MH038cmdii.png"))
             pg2 = page("dark")
             brain(pg2, BRAINS["dark"])
             pg2.screenshot(path=out("08_compare_dark_AB077.png"))

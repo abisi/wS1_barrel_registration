@@ -219,12 +219,17 @@ def prep(cfg, bid, hv):
     sl = crop20(reg, hv, VOX, DN)
     A = np.asarray(tifffile.memmap(f"{reg}/registered_atlas.tiff", mode="r")[sl]).astype(np.int64)
     H = np.asarray(tifffile.memmap(f"{reg}/registered_hemispheres.tiff", mode="r")[sl])
+    chans = cfg.channels(reg)
+    if IMG_CH not in chans:
+        raise RuntimeError(f"image channel {IMG_CH} (BARRELREG_CH) not available; channels found: {chans}")
     I = np.asarray(tifffile.memmap(cfg.ds_file(reg, IMG_CH), mode="r")[sl]).astype(np.float32)
-    # the other channel, to score every fit on both images (ch0 and ch1 fits are then compared on the same footing)
-    I2 = np.asarray(tifffile.memmap(cfg.ds_file(reg, 1 - IMG_CH), mode="r")[sl]).astype(np.float32)
+    # every other available channel, to score each fit on every image (fits on different channels are then compared on
+    # the same footing); a brain with one channel is scored on that one only
+    I2 = {c: np.asarray(tifffile.memmap(cfg.ds_file(reg, c), mode="r")[sl]).astype(np.float32) for c in chans if c != IMG_CH}
     if SHARPEN:
         amt, sig = SHARPEN
-        I, I2 = (np.maximum(x + amt * (x - ndimage.gaussian_filter(x, sig / VOX)), 0) for x in (I, I2))
+        shp = lambda x: np.maximum(x + amt * (x - ndimage.gaussian_filter(x, sig / VOX)), 0)
+        I, I2 = shp(I), {c: shp(x) for c, x in I2.items()}
     A20, H20 = A[::DN, ::DN, ::DN], H[::DN, ::DN, ::DN]
     # deformation-field check: field (mm) -> registration-atlas voxel -> annotation == registered atlas
     ann = cfg.registration_atlas()
@@ -259,7 +264,7 @@ def prep(cfg, bid, hv):
         stream_end=P[::25], stream_bad=bad[::25], v_A20=A20.astype(np.int32), v_u20=u, v_l4_20=l4_20, v_F20=F20)
     # 10 um working grid
     if DN == 1:
-        atl, ch0, hem, ch_other = up(A20, 0, UP), up(I, 1, UP), up(H20, 0, UP), up(I2, 1, UP)
+        atl, ch0, hem, ch_other = up(A20, 0, UP), up(I, 1, UP), up(H20, 0, UP), {c: up(x, 1, UP) for c, x in I2.items()}
     else:
         atl, ch0, hem, ch_other = A, I, H, I2
     hemi = hem == hv
@@ -572,15 +577,18 @@ def run_hemi(cfg, bid, hv, od):
     # metrics: initial placement (identity: Perens SSp-bfd centroid on the CCF one) vs corrected
     fv = v2 & ndimage.binary_dilation((cols > 0) | (cols_new > 0), iterations=5)
     names_blob = {int(ib[n]) + 1: int(ksA[ia[n]]) for n in range(len(ia))}
-    # the same fit scored on the other channel's slab (same depths, same masked pixels)
+    # the same fit scored on every other channel's slab (same depths, same masked pixels)
     ks = [d for d in OFFSETS_UM if abs(d - d_off) <= 25]
-    sl2 = [flat.mean(G[good & (np.abs(rel - d) <= 30)], P["ch_other"][good & (np.abs(rel - d) <= 30)]) for d in ks]
-    l4o, valid_o = np.mean([x[0] for x in sl2], 0), np.all([x[1] for x in sl2], 0)
-    v2o = valid_o & ~art
-    bpo = l4_bandpass(np.where(v2o, l4o, np.median(l4o[v2o])), valid_o, fieldd)
-    fvo = v2o & ndimage.binary_dilation((cols > 0) | (cols_new > 0), iterations=5)
-    con_ch = {IMG_CH: ps.sep_contrast(bpA, cols_new, fv), 1 - IMG_CH: ps.sep_contrast(bpo, cols_new, fvo)}
-    dbg(other_l4=l4o, other_bp=bpo)
+    con_ch = {IMG_CH: ps.sep_contrast(bpA, cols_new, fv)}
+    for c, vol in sorted(P["ch_other"].items()):
+        sl2 = [flat.mean(G[good & (np.abs(rel - d) <= 30)], vol[good & (np.abs(rel - d) <= 30)]) for d in ks]
+        l4o, valid_o = np.mean([x[0] for x in sl2], 0), np.all([x[1] for x in sl2], 0)
+        v2o = valid_o & ~art
+        bpo = l4_bandpass(np.where(v2o, l4o, np.median(l4o[v2o])), valid_o, fieldd)
+        fvo = v2o & ndimage.binary_dilation((cols > 0) | (cols_new > 0), iterations=5)
+        con_ch[c] = ps.sep_contrast(bpo, cols_new, fvo)
+        if c == min(P["ch_other"]):
+            dbg(other_l4=l4o, other_bp=bpo)
     d_b, _, n_b = ps.overlap_metrics(cols, blobs, names_blob)
     d_a, _, n_a = ps.overlap_metrics(cols_new, blobs, names_blob)
     sc_ = best["search"]
@@ -607,8 +615,9 @@ def run_hemi(cfg, bid, hv, od):
                naming_ambiguous=bool(np.isfinite(margin) and margin < TIE_CORR),
                err_initial_um=float(np.median(e_before)), err_tps_loo_um=float(np.median(e_loo)),
                contrast_initial=ps.sep_contrast(bpA, cols, fv), contrast_after=ps.sep_contrast(bpA, cols_new, fv),
-               image_channel=IMG_CH, contrast_after_ch0=con_ch[0], contrast_after_ch1=con_ch[1],
-               contrast_both=float(np.mean([con_ch[0], con_ch[1]])),
+               image_channel=IMG_CH, channels=sorted(con_ch),
+               **{f"contrast_after_ch{c}": v for c, v in sorted(con_ch.items())},
+               contrast_both=float(np.mean(list(con_ch.values()))),  # mean over every available channel
                contrast_refine=CREFINE, refined=refined, contrast_matched_fit=c_matched,
                contrast_refined_fit=c_refined, refine_placement=ref_place,
                dice_initial=d_b, dice_after=d_a, naming_initial=n_b, naming_after=n_a,
