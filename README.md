@@ -14,7 +14,7 @@ them. The output is:
 The coarse registration (brainreg to the Perens LSFM atlas at 20 µm, or to the Allen barrel atlas at 10 µm) is used
 only to find the barrel field, the hemisphere, and the pia and white-matter surfaces.
 
-**Documentation:** the [wiki](docs/wiki/Home.md) has the full workflow, the review page with screenshots, every
+**Documentation:** the [wiki](https://github.com/abisi/wS1_barrel_registration/wiki) has the full workflow, the review page with screenshots, every
 metric, the methods and troubleshooting. Background notes: [D2_explained.md](docs/D2_explained.md) (pipeline with
 figures), [methods_explained.md](docs/methods_explained.md) (the mathematics from first principles).
 
@@ -36,7 +36,7 @@ Per hemisphere:
 
 When the automatic search fails, two fallbacks: **sharpened** images (unsharp mask, for blurred brains) and a
 **seeded** fit (barrel centres clicked by hand on the review page replace the search). See
-[Methods](docs/wiki/Methods.md).
+[Methods](https://github.com/abisi/wS1_barrel_registration/wiki/Methods).
 
 ## Workflow at a glance
 
@@ -46,7 +46,7 @@ first pass (wide ch0 / ch1, lesion mask where needed)  →  review page: decide 
 ```
 
 Every step is a script in this repository; no agent or account is needed. Step-by-step commands:
-[Workflow](docs/wiki/Workflow.md).
+[Workflow](https://github.com/abisi/wS1_barrel_registration/wiki/Workflow).
 
 ## Install
 
@@ -112,7 +112,7 @@ python scripts/export_user_picks.py --run RUN --variants REDO/variants --picks p
 
 The review page shows all fits of a brain on one canvas (overlay or flicker), their metrics, and the barrel each probe
 track lands in; it records a decision per brain (use a fit / global is better / redo) and collects seed clicks. The
-same page can also be published as a claude.ai page. See [Review page](docs/wiki/Review-page.md).
+same page can also be published as a claude.ai page. See [Review page](https://github.com/abisi/wS1_barrel_registration/wiki/Review-page).
 
 ## Outputs
 
@@ -125,7 +125,7 @@ same page can also be published as a claude.ai page. See [Review page](docs/wiki
 | `FINAL/<ID>/registration_info.json` | the decision for this brain (`use_local` + variant, `use_global`, `redo`) and its metrics |
 | `<data>/<mouse>/<session>/Anatomy/wS1_barrel_registration/` | the mouse's final fit, copied for analysis |
 
-Hemispheres: brainglobe value 1 = left, 2 = right. Details: [Outputs and export](docs/wiki/Outputs-and-export.md).
+Hemispheres: brainglobe value 1 = left, 2 = right. Details: [Outputs and export](https://github.com/abisi/wS1_barrel_registration/wiki/Outputs-and-export).
 
 ## Quality control
 
@@ -135,7 +135,7 @@ Hemispheres: brainglobe value 1 = left, 2 = right. Details: [Outputs and export]
 - **`surface_bridged_frac` > 0.1**: damaged surface. **`field_check`** should be 1.000.
 - Seeded brains: score fits against the clicks with `scripts/click_agreement.py`.
 
-All fields: [Metrics](docs/wiki/Metrics.md).
+All fields: [Metrics](https://github.com/abisi/wS1_barrel_registration/wiki/Metrics).
 
 ## Code
 
@@ -163,6 +163,7 @@ All fields: [Metrics](docs/wiki/Metrics.md).
 | `brain_report.py`, `paper_figure.py`, `explain_d2.py` | step-by-step report, figures |
 | `map_channels_example.py`, `map_units_compare.py` | map probe channels / units through the final fits |
 | `compare_outputs.py`, `compare_runs.py`, `edge_check.py` | checks between runs |
+| `make_wiki_screenshots.py` | screenshots of the review page for the wiki |
 
 ## Provenance
 

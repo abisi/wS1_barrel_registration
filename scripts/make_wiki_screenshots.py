@@ -1,6 +1,9 @@
 """Screenshots of the review page for the wiki (headless Chrome via Playwright).
 
-usage: python docs/wiki/make_screenshots.py PAGE_DIR [--db DB_DIR] [--out docs/wiki/images]
+usage: python scripts/make_wiki_screenshots.py PAGE_DIR --out <wiki clone>/images [--db DB_DIR]
+
+The wiki is the GitHub wiki of this repository (git clone https://github.com/abisi/wS1_barrel_registration.wiki.git);
+commit and push the new images there.
 
 PAGE_DIR: a built review page (scripts/review_gui.py --out). --db: decisions / seeds to show (picks/, seeds/ with
 one JSON per brain, e.g. PAGE_DIR/db); they are served read-only, nothing is written. Needs `pip install playwright`
@@ -25,7 +28,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("page_dir")
     ap.add_argument("--db")
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "images"))
+    ap.add_argument("--out", required=True)
     a = ap.parse_args()
     D = {c: {} for c in ("picks", "seeds", "status", "requests")}
     if a.db:

@@ -14,7 +14,7 @@ Per brain it writes
 
 Fits = every <label>/<ID>/results/h1 under each --variants dir (later dirs win on a label clash). Picks, seeds, refit
 requests and refit status live in the page's database (collections picks, seeds, requests, status): <out>/db/ with
-review_server.py, or the claude.ai page database. See docs/wiki/Review-page.md.
+review_server.py, or the claude.ai page database. See the wiki page Review page.
 
 usage: python scripts/review_gui.py --variants D2_all_brains/variants D2_redo_*/variants --out DIR
            [--brains ...] [--seed-brains ...] [--tracks-table probe_insertion_info.csv] [-j 16]
